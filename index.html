@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sabıkalı Patiler - Dedektiflik Oyunu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Permanent+Marker&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19.2.4",
+        "react-dom/client": "https://esm.sh/react-dom@19.2.4/client",
+        "react/jsx-runtime": "https://esm.sh/react@19.2.4/jsx-runtime",
+        "framer-motion": "https://esm.sh/framer-motion@12.34.0",
+        "lucide-react": "https://esm.sh/lucide-react@0.564.0",
+        "@google/genai": "https://esm.sh/@google/genai@1.41.0"
+      }
+    }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            font-family: 'Google Sans Text', 'Google Sans', sans-serif;
+        }
+        .font-handwriting { font-family: 'Permanent Marker', cursive; }
+        .font-mono { font-family: 'Courier Prime', monospace; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        
+        /* Loading spinner */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        
+        /* Fade in animation */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .animate-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        /* Portrait mode overlay */
+        #rotate-overlay {
+            display: none;
+        }
+        @media screen and (orientation: portrait) and (max-width: 1024px) {
+            #rotate-overlay {
+                display: flex;
+            }
+        }
+        @keyframes rotatePulse {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(15deg); }
+            75% { transform: rotate(-15deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .rotate-hint {
+            animation: rotatePulse 2.5s ease-in-out infinite;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+<div id="rotate-overlay" style="position:fixed;inset:0;background:#1c1a17;z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:20px;color:#f5c842;">
+        <div class="rotate-hint" style="font-size:5rem;">📱</div>
+        <h2 style="font-size:1.4rem;font-weight:bold;text-align:center;font-family:'Playfair Display',serif;margin:0;padding:0 30px;color:#f5c842;">Lütfen Cihazı Yatay Çevirin</h2>
+        <p style="font-size:0.9rem;opacity:0.7;text-align:center;margin:0;padding:0 40px;font-family:sans-serif;color:#d4b896;">Bu oyun yatay (landscape) modda oynanmak üzere tasarlanmıştır.</p>
+        <div style="display:flex;align-items:center;gap:8px;opacity:0.5;font-size:0.8rem;font-family:sans-serif;color:#d4b896;">
+            <span>🔒</span><span>Yatay kilit açıksa kilidi kaldırın</span>
+        </div>
+    </div>
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useEffect } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { motion } from 'framer-motion';
+        import { Search, CheckCircle, XCircle, ArrowRight, Loader2, BrainCircuit, FileText, MapPin, Coffee, AlertTriangle, ZoomIn, X } from 'lucide-react';
+        import { GoogleGenAI, Type } from '@google/genai';
+
+        // ========== SABIKALI PATILER - DEDEKTIFLIK OYUNU ==========
+
+        // Constants
+        const INTRO_TEXT = {
+            title: "Sabıkalı Patiler",
+            subtitle: "Sonsuz Suç Döngüsü",
+            body: "Şehre yeni bir dedektif lazım. Yapay zeka tarafından anlık olarak oluşturulan benzersiz vakalar seni bekliyor. Her doğru karar sana itibar kazandıracak (+100 Puan), her yanlış suçlama ise seni rezil edecek (-50 Puan). Karakterler sevimli görünebilir ama hepsi şüpheli!",
+            button: "Yeni Dosya İste"
+        };
+
+        const SPECIES_EMOJI_MAP = {
+            'Köpek': '1f436', 'Kedi': '1f431', 'Ayı': '1f43b', 'Tavşan': '1f430',
+            'Tilki': '1f98a', 'Fare': '1f42d', 'Baykuş': '1f989', 'Rakun': '1f99d',
+            'Panda': '1f43c', 'Kaplan': '1f42f', 'Aslan': '1f981', 'Domuz': '1f437',
+            'Maymun': '1f435', 'Koala': '1f428'
+        };
+
+        // Gemini AI Integration
+        const generateCase = async (apiKey) => {
+            try {
+                const ai = new GoogleGenAI({ apiKey });
+                
+                const caseSchema = {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: { type: Type.STRING, description: "Vakanın gizemli adı" },
+                        description: { type: Type.STRING, description: "Zorlu vaka özeti" },
+                        suspects: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    name: { type: Type.STRING, description: "Format: '[Tür] [İngilizce İsim]'." },
+                                    species: { type: Type.STRING, description: "SADECE: 'Köpek', 'Kedi', 'Ayı', 'Tavşan', 'Tilki', 'Fare', 'Baykuş', 'Rakun', 'Panda', 'Kaplan', 'Aslan', 'Maymun', 'Domuz'" },
+                                    statement: { type: Type.STRING, description: "İfade." },
+                                    traits: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Karakter özellikleri" },
+                                    isGuilty: { type: Type.BOOLEAN },
+                                    accessory: { type: Type.STRING, enum: ['hat', 'glasses', 'eyepatch', 'tie', 'monocle', 'none'] },
+                                    appearance: { type: Type.STRING, enum: ['innocent', 'suspicious'], description: "Karakterin dış görünüşü. Masum veya Tehlikeli duruşu." },
+                                    criminalRecord: { type: Type.STRING, description: "Önceki sabıka kaydı. Örn: 'Temiz', 'Hırsızlık (2020)', 'Aşırı Hız', 'Gürültü Yapmak'." }
+                                },
+                                required: ["id", "name", "species", "statement", "traits", "isGuilty", "accessory", "appearance", "criminalRecord"],
+                            },
+                        },
+                        evidence: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    title: { type: Type.STRING },
+                                    type: { type: Type.STRING, enum: ["report", "note", "flyer"] },
+                                    content: { type: Type.STRING },
+                                },
+                                required: ["id", "title", "type", "content"],
+                            },
+                        },
+                        solution: {
+                            type: Type.OBJECT,
+                            properties: {
+                                successTitle: { type: Type.STRING },
+                                successMessage: { type: Type.STRING },
+                                failureTitle: { type: Type.STRING },
+                                failureMessage: { type: Type.STRING },
+                            },
+                            required: ["successTitle", "successMessage", "failureTitle", "failureMessage"],
+                        },
+                    },
+                    required: ["title", "description", "suspects", "evidence", "solution"],
+                };
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-2.0-flash",
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: caseSchema,
+                        systemInstruction: `
+Sen "Sabıkalı Patiler" oyunu için Usta Dedektiflik Yazarısın.
+
+GÖREV: Oyuncuyu TERS KÖŞE yapacak zorlukta vakalar üret.
+
+KRİTİK TALİMAT (GÖRSEL YANILTMA):
+1. **Görünüş (appearance) ile Suçluluk (isGuilty) arasında RASTGELE bir ilişki kur.**
+   - Masum bir karakter "suspicious" (tehlikeli) görünebilir, göz bandı takabilir ve kabarık bir sabıka kaydı olabilir.
+   - Suçlu karakter "innocent" (masum) görünebilir, papyon takabilir ve sicili temiz olabilir.
+   - ASLA "Kötü görünen suçludur" klişesine düşme. Oyuncuyu önyargılarıyla tuzağa düşür.
+
+2. **Aksesuar:**
+   - 'suspicious' görünenlere: eyepatch.
+   - 'innocent' görünenlere: tie, glasses, monocle, hat.
+   
+3. **Sabıka Kaydı (criminalRecord):**
+   - Komik suçlar uygun: "İzinsiz Miyavlama", "Mama Kadı Devirme", "Postacı Korkutma".
+   - Masumsların da sabıkası olabilir!
+
+ŞÜPHELİ SAYISI:
+- Her vakada MUTLAKA 4 şüpheli olsun. Bunlardan sadece 1 tanesi isGuilty: true olmalı.
+
+SENARYO ZORLUĞU:
+- Kanıtlar dolaylı olsun.
+- İfadelerdeki çelişkiler mantıksal olsun (zaman, mekan, fiziksel imkansızlık).
+- Dil: Türkçe.
+                        `,
+                    },
+                    contents: [{
+                        role: "user",
+                        parts: [{ text: "Görünüşlerin yanıltıcı olduğu, zor ve ters köşe bir vaka oluştur. MUTLAKA 4 şüpheli ekle, sadece biri suçlu olmalı." }],
+                    }],
+                });
+
+                const jsonText = response.text;
+                if (!jsonText) throw new Error("API boş yanıt döndürdü.");
+                const data = JSON.parse(jsonText);
+                data.id = Math.random().toString(36).substring(7);
+                return data;
+            } catch (error) {
+                console.error("Vaka oluşturulamadı:", error);
+                throw error;
+            }
+        };
+
+        // Components
+        const DraggableItem = ({ id, initialX, initialY, initialRotation, zIndex, onFocus, children, className = "" }) => {
+            return React.createElement(motion.div, {
+                drag: true,
+                dragMomentum: false,
+                initial: { x: initialX, y: initialY, rotate: initialRotation },
+                style: { zIndex, position: 'absolute', touchAction: 'none' },
+                onPointerDown: () => onFocus(id),
+                className: `cursor-grab active:cursor-grabbing ${className}`,
+                whileHover: { scale: 1.02 },
+                whileTap: { scale: 1.05 }
+            }, children);
+        };
+
+        const SuspectCard = ({ suspect, gameState, onZoom }) => {
+            const speciesKey = Object.keys(SPECIES_EMOJI_MAP).find(key => key.toLowerCase() === suspect.species.toLowerCase());
+            const emojiCode = speciesKey ? SPECIES_EMOJI_MAP[speciesKey] : '1f575';
+            const imageUrl = `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${emojiCode}.svg`;
+
+            const renderAccessory = () => {
+                if (!suspect.accessory || suspect.accessory === 'none') return null;
+                
+                let style = { position: 'absolute', zIndex: 10, lineHeight: 1 };
+                let content = '';
+                
+                switch (suspect.accessory) {
+                    case 'hat':
+                        content = '🎩';
+                        style = { ...style, top: '-35%', left: '15%', transform: 'rotate(-10deg)', fontSize: '3.5rem' };
+                        break;
+                    case 'glasses':
+                        content = '👓';
+                        style = { ...style, top: '25%', left: '10%', width: '80%', textAlign: 'center', fontSize: '2.5rem' };
+                        break;
+                    case 'monocle':
+                        return React.createElement('div', { className: "absolute top-[35%] right-[25%] w-8 h-8 border-2 border-amber-500 rounded-full bg-blue-200/20 z-10 shadow-sm pointer-events-none" },
+                            React.createElement('div', { className: "absolute -bottom-8 -right-2 w-0.5 h-10 bg-amber-600 transform -rotate-12" })
+                        );
+                    case 'eyepatch':
+                        return React.createElement('div', { className: "absolute top-[30%] right-[30%] w-8 h-8 bg-black/90 rounded-full z-10 shadow-lg pointer-events-none" },
+                            React.createElement('div', { className: "absolute top-4 -left-12 w-20 h-0.5 bg-black/80 transform -rotate-12" })
+                        );
+                    case 'tie':
+                        content = '🎀';
+                        if (Math.random() > 0.5) content = '👔';
+                        style = { ...style, bottom: '-15%', left: '25%', width: '50%', textAlign: 'center', fontSize: '2.5rem' };
+                        break;
+                    case 'bandana':
+                    case 'scarf':
+                        return null;
+                }
+                return React.createElement('div', { style: { ...style, pointerEvents: 'none' }, className: "drop-shadow-md select-none" }, content);
+            };
+
+            const isSuspicious = suspect.appearance === 'suspicious';
+            const containerClass = isSuspicious
+                ? "bg-stone-200 border-2 border-stone-600"
+                : "bg-blue-50 border border-blue-200";
+            const photoBgClass = isSuspicious
+                ? "bg-stone-400 grayscale-[0.5]"
+                : "bg-blue-100";
+            const headerClass = isSuspicious
+                ? "bg-stone-800 text-stone-200"
+                : "bg-blue-700 text-white";
+
+            return React.createElement('div', { className: `w-56 sm:w-64 p-2 sm:p-3 shadow-xl transform rotate-1 ${containerClass} transition-colors duration-300 touch-none select-none relative` },
+                React.createElement('div', { className: `${headerClass} p-1 mb-2 flex justify-between items-center px-2` },
+                    React.createElement('span', { className: "font-mono text-[10px] tracking-widest uppercase" }, isSuspicious ? "GÖZALTI" : "KİMLİK"),
+                    React.createElement('span', { className: "font-mono text-[10px]" }, suspect.id.slice(0, 4))
+                ),
+                React.createElement('div', { className: `relative h-40 sm:h-48 w-full overflow-visible ${photoBgClass} border-2 ${isSuspicious ? 'border-stone-700' : 'border-blue-300'} flex items-center justify-center mb-2` },
+                    isSuspicious && React.createElement('div', { className: "absolute inset-0 z-0 flex flex-col justify-evenly opacity-30 pointer-events-none" },
+                        React.createElement('div', { className: "border-b border-black w-full" }),
+                        React.createElement('div', { className: "border-b border-black w-full" }),
+                        React.createElement('div', { className: "border-b border-black w-full" }),
+                        React.createElement('div', { className: "border-b border-black w-full" })
+                    ),
+                    React.createElement('div', { className: "relative z-10 w-28 h-28 sm:w-32 sm:h-32" },
+                        React.createElement('img', { src: imageUrl, alt: suspect.species, className: "w-full h-full transform hover:scale-105 transition-transform duration-300 drop-shadow-lg pointer-events-none" }),
+                        renderAccessory()
+                    ),
+                    suspect.isGuilty && (gameState === 'success' || gameState === 'failure' || gameState === 'game_over') && React.createElement('div', { className: "absolute inset-0 z-20 flex items-center justify-center pointer-events-none" },
+                        React.createElement('div', { className: "border-4 border-red-600 text-red-600 font-bold text-3xl sm:text-4xl p-2 transform -rotate-12 opacity-80 bg-white/50 backdrop-blur-sm rounded" }, "SUÇLU")
+                    )
+                ),
+                React.createElement('h3', { className: `font-bold text-base sm:text-lg border-b-2 mb-1 uppercase font-serif tracking-wide truncate ${isSuspicious ? 'text-stone-900 border-stone-800' : 'text-blue-900 border-blue-200'}` }, suspect.name),
+                React.createElement('div', { className: "mb-2 bg-white/50 p-1.5 rounded border border-black/5" },
+                    React.createElement('div', { className: "flex items-center justify-between mb-1" },
+                        React.createElement('span', { className: "text-[10px] font-bold uppercase text-stone-500" }, "Sabıka:"),
+                        React.createElement('span', { className: `text-[10px] font-bold px-1.5 rounded text-white ${suspect.criminalRecord === 'Temiz' || suspect.criminalRecord.includes('Yok') ? 'bg-green-600' : 'bg-red-800'}` }, 
+                            suspect.criminalRecord === 'Temiz' ? 'TEMİZ' : 'SABIKALI'
+                        )
+                    ),
+                    React.createElement('p', { className: "text-xs font-mono leading-tight text-stone-700 truncate" }, suspect.criminalRecord)
+                ),
+                React.createElement('div', { className: "bg-white p-2 border border-stone-200 text-xs sm:text-sm italic font-serif leading-tight text-stone-800 relative shadow-sm" },
+                    React.createElement('span', { className: "text-2xl sm:text-4xl absolute -top-2 -left-1 text-stone-200" }, '"'),
+                    React.createElement('span', { className: "relative z-10 block min-h-[3em]" }, suspect.statement),
+                    React.createElement('span', { className: "text-2xl sm:text-4xl absolute -bottom-4 right-2 text-stone-200" }, '"')
+                ),
+                React.createElement('div', { className: "absolute -top-3 left-1/2 transform -translate-x-1/2 w-16 sm:w-24 h-6 bg-yellow-200/80 rotate-2 shadow-sm border-l border-r border-white/50 pointer-events-none" }),
+                onZoom && React.createElement('button', {
+                    onPointerDown: (e) => e.stopPropagation(),
+                    onClick: (e) => { e.stopPropagation(); onZoom(suspect); },
+                    className: `absolute bottom-2 right-2 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg z-30 transition-transform hover:scale-110 touch-auto ${isSuspicious ? 'bg-stone-700/90 hover:bg-stone-600 active:bg-stone-500' : 'bg-blue-700/90 hover:bg-blue-600 active:bg-blue-500'}`,
+                    title: "Tam Ekranda Görüntüle",
+                    style: { touchAction: 'auto' }
+                }, React.createElement(ZoomIn, { className: "w-4 h-4" }))
+            );
+        };
+
+        const EvidencePaper = ({ evidence, onZoom }) => {
+            const getIcon = () => {
+                switch (evidence.type) {
+                    case 'report': return React.createElement(AlertTriangle, { className: "w-6 h-6 text-red-700" });
+                    case 'note': return React.createElement(FileText, { className: "w-6 h-6 text-blue-800" });
+                    case 'flyer': return React.createElement(MapPin, { className: "w-6 h-6 text-green-700" });
+                    default: return React.createElement(Coffee, { className: "w-6 h-6 text-amber-800" });
+                }
+            };
+
+            const baseStyle = "w-64 p-4 shadow-xl text-sm transition-colors relative";
+            let specificStyle = "";
+            let fontStyle = "";
+
+            if (evidence.type === 'report') {
+                specificStyle = "bg-orange-50 border-l-4 border-red-700 text-stone-800";
+                fontStyle = "font-mono";
+            } else if (evidence.type === 'flyer') {
+                specificStyle = "bg-yellow-100 border border-yellow-300 text-stone-900";
+                fontStyle = "font-sans font-bold";
+            } else {
+                specificStyle = "bg-white border-t-8 border-blue-100 text-blue-900";
+                fontStyle = "font-handwriting font-serif italic";
+            }
+
+            return React.createElement('div', { className: `${baseStyle} ${specificStyle}` },
+                React.createElement('div', { className: "flex items-center gap-2 mb-3 border-b border-black/10 pb-2 pr-8" },
+                    getIcon(),
+                    React.createElement('span', { className: "font-bold uppercase tracking-wider text-xs opacity-70" }, `Kanıt #${evidence.id}`)
+                ),
+                React.createElement('h4', { className: "font-bold mb-2 text-base leading-tight" }, evidence.title),
+                React.createElement('p', { className: `whitespace-pre-line leading-relaxed ${fontStyle}` }, evidence.content),
+                evidence.type === 'report' && React.createElement('div', { className: "absolute bottom-2 right-2 opacity-20 transform -rotate-12 pointer-events-none" },
+                    React.createElement('div', { className: "border-4 border-red-900 text-red-900 rounded-full w-24 h-24 flex items-center justify-center font-bold text-xl uppercase tracking-widest" }, "GİZLİ")
+                ),
+                onZoom && React.createElement('button', {
+                    onPointerDown: (e) => e.stopPropagation(),
+                    onClick: (e) => { e.stopPropagation(); onZoom(evidence); },
+                    className: "absolute top-2 right-2 bg-amber-700/90 hover:bg-amber-600 active:bg-amber-500 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg z-30 transition-transform hover:scale-110 touch-auto",
+                    title: "Tam Ekranda Görüntüle",
+                    style: { touchAction: 'auto' }
+                }, React.createElement(ZoomIn, { className: "w-4 h-4" }))
+            );
+        };
+
+        // ========== ZOOM MODAL ==========
+        const ZoomModal = ({ zoomItem, onClose, gameState }) => {
+            if (!zoomItem) return null;
+            const { type, data } = zoomItem;
+
+            const getEvidenceIcon = (t) => {
+                switch (t) {
+                    case 'report': return React.createElement(AlertTriangle, { className: "w-8 h-8 text-red-700" });
+                    case 'note': return React.createElement(FileText, { className: "w-8 h-8 text-blue-800" });
+                    case 'flyer': return React.createElement(MapPin, { className: "w-8 h-8 text-green-700" });
+                    default: return React.createElement(Coffee, { className: "w-8 h-8 text-amber-800" });
+                }
+            };
+
+            const getSuspectImg = (species) => {
+                const key = Object.keys(SPECIES_EMOJI_MAP).find(k => k.toLowerCase() === species.toLowerCase());
+                const code = key ? SPECIES_EMOJI_MAP[key] : '1f575';
+                return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${code}.svg`;
+            };
+
+            const content = type === 'evidence'
+                ? React.createElement('div', {
+                    className: `p-6 sm:p-8 shadow-2xl max-w-lg w-full ${
+                        data.type === 'report' ? 'bg-orange-50 border-l-8 border-red-700 text-stone-800' :
+                        data.type === 'flyer' ? 'bg-yellow-100 border-2 border-yellow-300 text-stone-900' :
+                        'bg-white border-t-8 border-blue-100 text-blue-900'
+                    }`
+                },
+                    React.createElement('div', { className: "flex items-center gap-3 mb-5 border-b border-black/10 pb-3" },
+                        getEvidenceIcon(data.type),
+                        React.createElement('span', { className: "font-bold uppercase tracking-wider text-sm opacity-70" }, `Kanıt #${data.id}`),
+                        React.createElement('span', { className: "ml-auto text-xs opacity-50 uppercase" }, data.type)
+                    ),
+                    React.createElement('h4', { className: "font-bold mb-4 text-2xl leading-tight" }, data.title),
+                    React.createElement('p', {
+                        className: `whitespace-pre-line leading-loose text-base sm:text-lg ${
+                            data.type === 'report' ? 'font-mono' : data.type === 'flyer' ? 'font-sans font-bold' : 'font-serif italic'
+                        }`
+                    }, data.content)
+                )
+                : React.createElement('div', { className: "bg-stone-100 p-6 sm:p-8 shadow-2xl max-w-lg w-full" },
+                    React.createElement('div', { className: "flex items-center gap-5 mb-5 border-b border-stone-300 pb-5" },
+                        React.createElement('img', { src: getSuspectImg(data.species), alt: data.species, className: "w-24 h-24 object-contain flex-shrink-0" }),
+                        React.createElement('div', {},
+                            React.createElement('h3', { className: "text-2xl font-bold font-serif text-stone-800 uppercase leading-tight" }, data.name),
+                            React.createElement('p', { className: "text-sm text-stone-500 uppercase tracking-widest mt-1" }, data.species),
+                            React.createElement('div', { className: "flex items-center gap-2 mt-2" },
+                                React.createElement('span', { className: `text-xs font-bold px-2 py-0.5 rounded text-white ${data.criminalRecord === 'Temiz' || data.criminalRecord.includes('Yok') ? 'bg-green-600' : 'bg-red-800'}` },
+                                    data.criminalRecord === 'Temiz' ? 'TEMİZ' : 'SABIKALI'
+                                ),
+                                React.createElement('span', { className: "text-xs text-stone-500 font-mono" }, data.criminalRecord)
+                            )
+                        )
+                    ),
+                    React.createElement('div', { className: "bg-white p-5 border border-stone-200 shadow-sm relative mb-4" },
+                        React.createElement('div', { className: "text-5xl text-stone-200 leading-none mb-2" }, '"'),
+                        React.createElement('p', { className: "text-base sm:text-lg font-serif italic leading-relaxed text-stone-800" }, data.statement),
+                        React.createElement('div', { className: "text-5xl text-stone-200 text-right leading-none mt-2" }, '"')
+                    ),
+                    data.traits && data.traits.length > 0 && React.createElement('div', {},
+                        React.createElement('span', { className: "text-xs uppercase font-bold text-stone-500 mr-2" }, "Özellikler:"),
+                        data.traits.map((trait, i) => React.createElement('span', {
+                            key: i,
+                            className: "inline-block bg-stone-200 text-stone-700 text-xs px-2 py-0.5 rounded-full mr-1 mb-1"
+                        }, trait))
+                    ),
+                    data.isGuilty && (gameState === 'success' || gameState === 'failure' || gameState === 'game_over') &&
+                        React.createElement('div', { className: "mt-4 bg-red-100 border-2 border-red-500 text-red-700 text-center font-bold text-xl py-3 rounded uppercase tracking-widest" }, "⚠️ SUÇLU ÇIKTI")
+                );
+
+            return React.createElement('div', {
+                className: "fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4",
+                onClick: onClose,
+                style: { touchAction: 'auto' }
+            },
+                React.createElement('div', {
+                    className: "relative w-full max-w-lg max-h-[90vh] overflow-y-auto",
+                    onClick: (e) => e.stopPropagation()
+                },
+                    React.createElement('button', {
+                        onClick: onClose,
+                        className: "absolute -top-12 right-0 text-white bg-stone-700 hover:bg-stone-600 active:bg-stone-500 rounded-full p-2.5 z-10 shadow-lg",
+                        style: { touchAction: 'auto' }
+                    }, React.createElement(X, { className: "w-6 h-6" })),
+                    content
+                )
+            );
+        };
+
+        // Main App Component
+        function App() {
+            const [gameState, setGameState] = useState('intro');
+            const [currentCase, setCurrentCase] = useState(null);
+            const [score, setScore] = useState(0);
+            const [zIndices, setZIndices] = useState({});
+            const [topZ, setTopZ] = useState(10);
+            const [selectedSuspectId, setSelectedSuspectId] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [screenSize, setScreenSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+            const [apiKey, setApiKey] = useState(localStorage.getItem('geminiApiKey') || '');
+            const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+            const [zoomItem, setZoomItem] = useState(null);
+
+            useEffect(() => {
+                const handleResize = () => setScreenSize({ w: window.innerWidth, h: window.innerHeight });
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
+            useEffect(() => {
+                if (currentCase) {
+                    const initialIndices = {};
+                    currentCase.suspects.forEach((s, i) => initialIndices[s.id] = i + 1);
+                    currentCase.evidence.forEach((e, i) => initialIndices[e.id] = i + 1 + currentCase.suspects.length);
+                    setZIndices(initialIndices);
+                    setTopZ(20);
+                    setSelectedSuspectId(null);
+                }
+            }, [currentCase]);
+
+            const loadNewCase = async () => {
+                if (!apiKey) {
+                    setShowApiKeyInput(true);
+                    return;
+                }
+                setLoading(true);
+                setGameState('loading');
+                try {
+                    const newCase = await generateCase(apiKey);
+                    setCurrentCase(newCase);
+                    setGameState('investigation');
+                    localStorage.setItem('geminiApiKey', apiKey);
+                } catch (e) {
+                    console.error(e);
+                    alert('Vaka oluşturulamadı. API anahtarınızı kontrol edin.');
+                    setGameState('intro');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const bringToFront = (id) => {
+                const newZ = topZ + 1;
+                setTopZ(newZ);
+                setZIndices(prev => ({ ...prev, [id]: newZ }));
+            };
+
+            const handleAccusation = (suspect) => {
+                if (suspect.isGuilty) {
+                    setScore(prev => prev + 100);
+                    setGameState('success');
+                } else {
+                    setScore(prev => prev - 50);
+                    setGameState('failure');
+                }
+            };
+
+            const getRank = (finalScore) => {
+                if (finalScore >= 500) return "Dedektif Kralı";
+                if (finalScore >= 250) return "Başkomiser";
+                if (finalScore >= 100) return "Memur";
+                return "Stajyer";
+            };
+
+            const getInitialPosition = (type, index) => {
+                const isMobile = screenSize.w < 1024;
+                const isLandscape = screenSize.w > screenSize.h;
+                const safeW = screenSize.w - (isMobile ? 50 : 200);
+                const centerX = screenSize.w / 2;
+
+                if (type === 'suspect') {
+                    if (isMobile && isLandscape) {
+                        // Landscape mobile: spread horizontally across top
+                        const spacing = Math.floor((screenSize.w - 260) / 3);
+                        return {
+                            x: 15 + (index * spacing),
+                            y: 80,
+                            rot: (index % 2 === 0 ? -2 : 2)
+                        };
+                    } else if (isMobile) {
+                        return {
+                            x: 20 + (index * 15),
+                            y: 100 + (index * 60),
+                            rot: (Math.random() * 4) - 2
+                        };
+                    } else {
+                        const spread = 250;
+                        const startX = centerX - 350;
+                        return {
+                            x: startX + (index * spread),
+                            y: 120,
+                            rot: (index % 2 === 0 ? -2 : 2)
+                        };
+                    }
+                } else {
+                    if (isMobile && isLandscape) {
+                        // Landscape mobile: spread evidence across bottom half
+                        const spacing = Math.floor((screenSize.w - 260) / 3);
+                        return {
+                            x: 15 + (index * spacing),
+                            y: screenSize.h - 210,
+                            rot: (Math.random() * 10) - 5
+                        };
+                    } else if (isMobile) {
+                        return {
+                            x: 20 + (index * 10),
+                            y: screenSize.h - 250 - (index * 10),
+                            rot: (Math.random() * 10) - 5
+                        };
+                    } else {
+                        return {
+                            x: (Math.random() * safeW) + 50,
+                            y: (Math.random() * 150) + 400,
+                            rot: (Math.random() * 20) - 10
+                        };
+                    }
+                }
+            };
+
+            const getSuspectImage = (species) => {
+                const key = Object.keys(SPECIES_EMOJI_MAP).find(k => k.toLowerCase() === species.toLowerCase());
+                const code = key ? SPECIES_EMOJI_MAP[key] : '1f575';
+                return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${code}.svg`;
+            };
+
+            // === RENDERS ===
+            if (gameState === 'intro') {
+                return React.createElement('div', { className: "min-h-screen bg-stone-900 flex items-center justify-center p-4 font-serif text-stone-200" },
+                    React.createElement('div', { className: "max-w-md w-full bg-stone-800 p-8 shadow-2xl border-t-4 border-amber-600 rounded-lg relative overflow-hidden" },
+                        React.createElement('div', { className: "flex justify-center mb-6" },
+                            React.createElement(BrainCircuit, { className: "w-16 h-16 text-amber-500 opacity-80" })
+                        ),
+                        React.createElement('h1', { className: "text-3xl font-bold text-center mb-2 tracking-wider text-amber-500" }, INTRO_TEXT.title),
+                        React.createElement('h2', { className: "text-xl text-center mb-6 text-stone-400 uppercase tracking-widest" }, INTRO_TEXT.subtitle),
+                        React.createElement('p', { className: "text-lg leading-relaxed mb-8 text-stone-300 italic" }, `"${INTRO_TEXT.body}"`),
+                        showApiKeyInput && React.createElement('div', { className: "mb-4" },
+                            React.createElement('label', { className: "block text-sm mb-2 text-stone-300" }, "Gemini API Anahtarı:"),
+                            React.createElement('input', {
+                                type: "password",
+                                value: apiKey,
+                                onChange: (e) => setApiKey(e.target.value),
+                                placeholder: "API anahtarınızı girin",
+                                className: "w-full p-2 rounded bg-stone-700 text-white border border-stone-600 focus:outline-none focus:border-amber-500"
+                            }),
+                            React.createElement('p', { className: "text-xs text-stone-400 mt-1" }, "Ücretsiz anahtar: aistudio.google.com")
+                        ),
+                        React.createElement('button', {
+                            onClick: loadNewCase,
+                            className: "w-full bg-amber-700 hover:bg-amber-600 text-white font-bold py-4 rounded shadow-lg transition-transform transform hover:scale-105 uppercase tracking-widest flex items-center justify-center gap-2"
+                        }, INTRO_TEXT.button)
+                    )
+                );
+            }
+
+            if (gameState === 'loading') {
+                return React.createElement('div', { className: "min-h-screen bg-stone-900 flex flex-col items-center justify-center p-4 font-serif text-amber-500" },
+                    React.createElement(Loader2, { className: "w-16 h-16 animate-spin mb-4" }),
+                    React.createElement('h2', { className: "text-2xl font-bold uppercase tracking-widest animate-pulse" }, "Vaka Oluşturuluyor..."),
+                    React.createElement('p', { className: "text-stone-400 mt-2" }, "Şüpheliler sorgulanıyor, kanıtlar toplanıyor.")
+                );
+            }
+
+            const isRoundEnd = gameState === 'success' || gameState === 'failure';
+
+            return React.createElement('div', { className: "min-h-screen h-screen bg-[#2c241b] overflow-hidden relative selection:bg-amber-200 selection:text-amber-900 touch-none" },
+                React.createElement('div', { className: "absolute inset-0 opacity-10 pointer-events-none", style: { backgroundImage: 'url("https://www.transparenttextures.com/patterns/wood-pattern.png")' } }),
+                
+                // Header
+                React.createElement('div', { className: "absolute top-0 left-0 right-0 h-16 bg-stone-900/95 backdrop-blur-sm z-50 flex items-center justify-between px-4 sm:px-6 shadow-xl border-b border-stone-700" },
+                    React.createElement('div', { className: "flex items-center gap-4 text-stone-200" },
+                        React.createElement('div', { className: "flex items-center gap-2" },
+                            React.createElement(Search, { className: "w-5 h-5 text-amber-500" }),
+                            React.createElement('span', { className: "font-bold tracking-widest uppercase text-sm hidden sm:block" }, "Sabıkalı Patiler")
+                        ),
+                        React.createElement('div', { className: "h-6 w-px bg-stone-700 mx-2 hidden sm:block" }),
+                        React.createElement('div', { className: "text-xs font-mono text-stone-400 hidden md:block truncate max-w-[200px]" },
+                            "Vaka: ",
+                            React.createElement('span', { className: "text-white font-bold" }, currentCase?.title)
+                        )
+                    ),
+                    React.createElement('div', { className: "flex items-center gap-2 sm:gap-4" },
+                        React.createElement('div', { className: "bg-stone-800 px-3 py-1 rounded border border-stone-600 flex flex-col items-end" },
+                            React.createElement('span', { className: "text-[9px] text-stone-400 uppercase tracking-widest" }, getRank(score)),
+                            React.createElement('span', { className: `font-mono font-bold leading-none text-sm ${score < 0 ? 'text-red-400' : 'text-green-400'}` }, `${score} P`)
+                        ),
+                        gameState === 'investigation' && React.createElement('button', {
+                            onClick: () => setGameState('accusation'),
+                            className: "bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded font-bold uppercase tracking-wider text-xs sm:text-sm shadow-lg transition-colors border border-red-500 animate-pulse whitespace-nowrap"
+                        }, "Suçla")
+                    )
+                ),
+
+                // Game Area
+                React.createElement('div', { className: "w-full h-full absolute top-0 left-0 overflow-hidden cursor-crosshair touch-none" },
+                    gameState === 'investigation' && currentCase && React.createElement('div', { className: "absolute top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 bg-stone-800/90 text-stone-200 p-3 sm:p-4 rounded shadow-xl border border-amber-900/50 max-w-2xl text-center z-10 pointer-events-none animate-in slide-in-from-top-4 duration-700" },
+                        React.createElement('h3', { className: "text-amber-500 font-bold uppercase tracking-widest text-xs sm:text-sm mb-1" }, currentCase.title),
+                        React.createElement('p', { className: "font-serif italic text-xs sm:text-sm" }, currentCase.description)
+                    ),
+
+                    // Suspects
+                    currentCase?.suspects.map((suspect, index) => {
+                        const pos = getInitialPosition('suspect', index);
+                        return React.createElement(DraggableItem, {
+                            key: suspect.id,
+                            id: suspect.id,
+                            initialX: pos.x,
+                            initialY: pos.y,
+                            initialRotation: pos.rot,
+                            zIndex: zIndices[suspect.id] || 1,
+                            onFocus: bringToFront
+                        }, React.createElement(SuspectCard, { suspect, gameState, onZoom: (s) => setZoomItem({ type: 'suspect', data: s }) }));
+                    }),
+
+                    // Evidence
+                    currentCase?.evidence.map((evidence, index) => {
+                        const pos = getInitialPosition('evidence', index);
+                        return React.createElement(DraggableItem, {
+                            key: evidence.id,
+                            id: evidence.id,
+                            initialX: pos.x,
+                            initialY: pos.y,
+                            initialRotation: pos.rot,
+                            zIndex: zIndices[evidence.id] || 1,
+                            onFocus: bringToFront
+                        }, React.createElement(EvidencePaper, { evidence, onZoom: (ev) => setZoomItem({ type: 'evidence', data: ev }) }));
+                    })
+                ),
+
+                // Accusation Modal
+                gameState === 'accusation' && currentCase && React.createElement('div', { className: "absolute inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" },
+                    React.createElement('div', { className: "bg-stone-100 max-w-4xl w-full p-4 sm:p-8 rounded-sm shadow-2xl relative border-4 sm:border-8 border-stone-800 my-auto" },
+                        React.createElement('button', {
+                            onClick: () => setGameState('investigation'),
+                            className: "absolute top-2 right-2 sm:top-4 sm:right-4 text-stone-500 hover:text-stone-800 font-bold text-sm bg-stone-200 px-2 py-1 rounded"
+                        }, "İPTAL"),
+                        React.createElement('h2', { className: "text-2xl sm:text-3xl font-bold text-center mb-2 uppercase text-stone-800" }, "Suçlu Kim?"),
+                        React.createElement('p', { className: "text-center text-stone-500 mb-4 sm:mb-8 font-serif italic text-xs sm:text-sm" }, "Yanlış seçim: -50 puan."),
+                        React.createElement('div', { className: "grid grid-cols-2 sm:grid-cols-4 gap-3" },
+                            currentCase.suspects.map((suspect) => React.createElement('button', {
+                                key: suspect.id,
+                                onClick: () => setSelectedSuspectId(suspect.id),
+                                className: `flex flex-col items-center relative group transition-all duration-200 bg-white p-2 shadow-sm border border-stone-200 ${selectedSuspectId === suspect.id ? 'ring-4 ring-red-600 z-10' : 'hover:bg-stone-50'}`
+                            },
+                                React.createElement('div', { className: "w-full h-24 sm:h-28 p-1 bg-amber-50 flex-shrink-0" },
+                                    React.createElement('img', { src: getSuspectImage(suspect.species), alt: suspect.name, className: "w-full h-full object-contain" })
+                                ),
+                                React.createElement('div', { className: "text-center p-1" },
+                                    React.createElement('h3', { className: "text-xs sm:text-sm font-bold uppercase font-serif text-stone-800 leading-tight" }, suspect.name),
+                                    React.createElement('p', { className: "text-[10px] text-stone-500 uppercase" }, suspect.species)
+                                ),
+                                selectedSuspectId === suspect.id && React.createElement('div', { className: "absolute -top-3 -right-3 bg-red-600 text-white rounded-full p-1 shadow-lg" },
+                                    React.createElement(CheckCircle, { className: "w-5 h-5" })
+                                )
+                            ))
+                        ),
+                        React.createElement('div', { className: "mt-6 sm:mt-8 flex justify-center" },
+                            React.createElement('button', {
+                                disabled: !selectedSuspectId,
+                                onClick: () => selectedSuspectId && handleAccusation(currentCase.suspects.find(s => s.id === selectedSuspectId)),
+                                className: `w-full sm:w-auto px-12 py-3 sm:py-4 text-lg sm:text-xl font-bold uppercase tracking-widest rounded shadow-xl transition-all ${selectedSuspectId
+                                    ? 'bg-red-700 text-white hover:bg-red-800 transform hover:-translate-y-1'
+                                    : 'bg-stone-300 text-stone-500 cursor-not-allowed'}`
+                            }, "KARARI ONAYLA")
+                        )
+                    )
+                ),
+
+                // Result Modal
+                isRoundEnd && currentCase && React.createElement('div', { className: "absolute inset-0 z-[100] bg-stone-900 flex items-center justify-center p-4 animate-in fade-in duration-500" },
+                    React.createElement('div', { className: `max-w-2xl w-full p-6 sm:p-8 rounded-lg shadow-2xl border-l-8 ${gameState === 'success' ? 'bg-green-50 border-green-600' : 'bg-red-50 border-red-600'}` },
+                        React.createElement('div', { className: "flex flex-col sm:flex-row items-center gap-4 mb-6 text-center sm:text-left" },
+                            gameState === 'success' ? React.createElement(CheckCircle, { className: "w-12 h-12 sm:w-16 sm:h-16 text-green-600" }) : React.createElement(XCircle, { className: "w-12 h-12 sm:w-16 sm:h-16 text-red-600" }),
+                            React.createElement('div', {},
+                                React.createElement('h2', { className: `text-2xl sm:text-3xl font-bold uppercase tracking-wider ${gameState === 'success' ? 'text-green-800' : 'text-red-800'}` }, 
+                                    gameState === 'success' ? currentCase.solution.successTitle : currentCase.solution.failureTitle
+                                ),
+                                React.createElement('div', { className: "flex items-center justify-center sm:justify-start gap-2 mt-1" },
+                                    React.createElement('span', { className: `font-bold px-2 py-0.5 rounded text-sm text-white ${gameState === 'success' ? 'bg-green-700' : 'bg-red-700'}` }, 
+                                        gameState === 'success' ? '+100 Puan' : '-50 Puan'
+                                    ),
+                                    React.createElement('span', { className: "text-stone-500 font-serif italic text-sm" }, "Vaka Sonucu")
+                                )
+                            )
+                        ),
+                        React.createElement('div', { className: "prose prose-stone mb-8 text-base sm:text-lg text-stone-700 leading-relaxed font-serif border-t border-stone-200 pt-4 max-h-[40vh] overflow-y-auto" }, 
+                            gameState === 'success' ? currentCase.solution.successMessage : currentCase.solution.failureMessage
+                        ),
+                        React.createElement('div', { className: "flex justify-center sm:justify-end" },
+                            React.createElement('button', {
+                                onClick: loadNewCase,
+                                className: `flex items-center gap-2 px-8 py-3 rounded font-bold uppercase tracking-widest shadow-lg text-white transition-transform transform hover:scale-105 ${gameState === 'success' ? 'bg-green-700 hover:bg-green-800' : 'bg-stone-700 hover:bg-stone-800'}`
+                            },
+                                "Sıradaki Vaka ",
+                                React.createElement(ArrowRight, { className: "w-5 h-5" })
+                            )
+                        )
+                    )
+                ),
+
+                // ZoomModal - tam ekran büyüteç katmanı
+                React.createElement(ZoomModal, { zoomItem, onClose: () => setZoomItem(null), gameState })
+            );
+        }
+
+        // Mount React App
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(React.StrictMode, {}, React.createElement(App)));
+    </script>
+</body>
+</html>
