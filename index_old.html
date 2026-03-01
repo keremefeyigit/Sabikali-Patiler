@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sabıkalı Patiler - Dedektiflik Oyunu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Permanent+Marker&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            font-family: 'Google Sans Text', 'Google Sans', sans-serif;
+        }
+        .font-handwriting { font-family: 'Permanent Marker', cursive; }
+        .font-mono { font-family: 'Courier Prime', monospace; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-in { animation: fadeIn 0.5s ease-in; }
+
+        @keyframes rotatePulse {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(15deg); }
+            75% { transform: rotate(-15deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .rotate-hint { animation: rotatePulse 2.5s ease-in-out infinite; display: inline-block; }
+
+        #rotate-overlay { display: none; }
+        @media screen and (orientation: portrait) and (max-width: 1024px) {
+            #rotate-overlay { display: flex; }
+        }
+
+        .draggable-item {
+            position: absolute;
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+        }
+        .draggable-item.dragging { cursor: grabbing; }
+    </style>
+</head>
+<body>
+<div id="rotate-overlay" style="position:fixed;inset:0;background:#1c1a17;z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:20px;color:#f5c842;">
+    <div class="rotate-hint" style="font-size:5rem;">📱</div>
+    <h2 style="font-size:1.4rem;font-weight:bold;text-align:center;font-family:'Playfair Display',serif;margin:0;padding:0 30px;color:#f5c842;">Lütfen Cihazı Yatay Çevirin</h2>
+    <p style="font-size:0.9rem;opacity:0.7;text-align:center;margin:0;padding:0 40px;font-family:sans-serif;color:#d4b896;">Bu oyun yatay (landscape) modda oynanmak üzere tasarlanmıştır.</p>
+    <div style="display:flex;align-items:center;gap:8px;opacity:0.5;font-size:0.8rem;font-family:sans-serif;color:#d4b896;">
+        <span>🔒</span><span>Yatay kilit açıksa kilidi kaldırın</span>
+    </div>
+</div>
+<div id="root"></div>
+
+<script>
+// ========== SABIKALI PATİLER - DEDEKTIFLIK OYUNU (Vanilla HTML5) ==========
+
+// ---------- Constants ----------
+const INTRO_TEXT = {
+    title: "Sabıkalı Patiler",
+    subtitle: "Sonsuz Suç Döngüsü",
+    body: "Şehre yeni bir dedektif lazım. Yapay zeka tarafından anlık olarak oluşturulan benzersiz vakalar seni bekliyor. Her doğru karar sana itibar kazandıracak (+100 Puan), her yanlış suçlama ise seni rezil edecek (-50 Puan). Karakterler sevimli görünebilir ama hepsi şüpheli!",
+    button: "Yeni Dosya İste"
+};
+
+const SPECIES_EMOJI_MAP = {
+    'Köpek':'1f436','Kedi':'1f431','Ayı':'1f43b','Tavşan':'1f430',
+    'Tilki':'1f98a','Fare':'1f42d','Baykuş':'1f989','Rakun':'1f99d',
+    'Panda':'1f43c','Kaplan':'1f42f','Aslan':'1f981','Domuz':'1f437',
+    'Maymun':'1f435','Koala':'1f428'
+};
+
+// ---------- App State ----------
+let state = {
+    gameState: 'intro',
+    currentCase: null,
+    score: 0,
+    zIndices: {},
+    topZ: 10,
+    selectedSuspectId: null,
+    loading: false,
+    zoomItem: null
+};
+
+function setState(patch) {
+    Object.assign(state, patch);
+    render();
+}
+
+// ---------- Gemini API (hardcoded key) ----------
+const GEMINI_API_KEY = ""; // API anahtarını buraya girin
+
+const CASE_SYSTEM_INSTRUCTION = `
+Sen "Sabıkalı Patiler" oyunu için Usta Dedektiflik Yazarısın.
+
+GÖREV: Oyuncuyu TERS KÖŞE yapacak zorlukta, tamamen özgün vakalar üret.
+
+KRİTİK TALİMAT 1 — GÖRSEL YANILTMA:
+- Görünüş (appearance) ile Suçluluk (isGuilty) arasında HİÇBİR bağlantı olmasın.
+- Masum karakterler "suspicious" görünebilir, göz bandı takabilir, uzun sabıka kaydı olabilir.
+- Suçlu karakterler "innocent" görünebilir, papyon/şapka takabilir, sicili tertemiz olabilir.
+- ASLA "Kötü görünen = suçlu" klişesine düşme.
+
+KRİTİK TALİMAT 2 — TÜR STEREOTİPİNDEN KAÇIN:
+- Hayvan türü ile suç/karakter özelliği arasında KESİNLİKLE klişe bağlantı kurma.
+- Tilki kurnaz olmak zorunda değil. Rakun çöp karıştırmak zorunda değil.
+  Ayı bal çalmak zorunda değil. Kedi balık çalmak zorunda değil.
+  Köpek sadık olmak zorunda değil. Fare küçük/sessiz olmak zorunda değil.
+- Özellikleri (traits) ve suçları tamamen RASTGELE ve beklenmedik ata.
+- Suçlunun türü ile işlenen suç arasında hiçbir mantıksal bağ olmasın.
+
+KRİTİK TALİMAT 3 — AKSESUAR:
+- 'suspicious' görünenlere: eyepatch
+- 'innocent' görünenlere: tie, glasses, monocle, hat (rastgele seç)
+
+ŞÜPHELI SAYISI: Her vakada tam 4 şüpheli, sadece 1 tanesi isGuilty: true.
+
+SCENARIO: Kanıtlar dolaylı, ifadelerdeki çelişkiler mantıksal olsun. Dil: Türkçe.
+`;
+
+const CASE_SCHEMA = {
+    type: "object",
+    properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        suspects: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    id: { type: "string" },
+                    name: { type: "string", description: "Format: '[Tür] [İngilizce İsim]'" },
+                    species: { type: "string", description: "SADECE: 'Köpek','Kedi','Ayı','Tavşan','Tilki','Fare','Baykuş','Rakun','Panda','Kaplan','Aslan','Maymun','Domuz','Koala'" },
+                    statement: { type: "string" },
+                    traits: { type: "array", items: { type: "string" } },
+                    isGuilty: { type: "boolean" },
+                    accessory: { type: "string", enum: ["hat","glasses","eyepatch","tie","monocle","none"] },
+                    appearance: { type: "string", enum: ["innocent","suspicious"] },
+                    criminalRecord: { type: "string" }
+                },
+                required: ["id","name","species","statement","traits","isGuilty","accessory","appearance","criminalRecord"]
+            }
+        },
+        evidence: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    id: { type: "string" },
+                    title: { type: "string" },
+                    type: { type: "string", enum: ["report","note","flyer"] },
+                    content: { type: "string" }
+                },
+                required: ["id","title","type","content"]
+            }
+        },
+        solution: {
+            type: "object",
+            properties: {
+                successTitle: { type: "string" },
+                successMessage: { type: "string" },
+                failureTitle: { type: "string" },
+                failureMessage: { type: "string" }
+            },
+            required: ["successTitle","successMessage","failureTitle","failureMessage"]
+        }
+    },
+    required: ["title","description","suspects","evidence","solution"]
+};
+
+async function generateCase() {
+    if (!GEMINI_API_KEY) {
+        // API anahtarı yoksa demo vaka döndür
+        await new Promise(r => setTimeout(r, 800));
+        return DEMO_CASE();
+    }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const body = {
+        contents: [{ role: "user", parts: [{ text: "Tür stereotipinden tamamen kaçınan, görünüşün yanıltıcı olduğu, ters köşe bir vaka oluştur. MUTLAKA 4 şüpheli, sadece 1 suçlu." }] }],
+        systemInstruction: { parts: [{ text: CASE_SYSTEM_INSTRUCTION }] },
+        generationConfig: { responseMimeType: "application/json", responseSchema: CASE_SCHEMA }
+    };
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`API Hatası: ${res.status} ${res.statusText}`);
+    const json = await res.json();
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("API boş yanıt döndürdü.");
+    const data = JSON.parse(text);
+    data.id = Math.random().toString(36).substring(7);
+    return data;
+}
+
+// ---------- Demo Vaka (API anahtarı yokken) ----------
+function DEMO_CASE() {
+    const cases = [
+    {
+        title: "Balık Pazarı Cinayeti",
+        description: "Sabah 6'da balık pazarında bir sandık içinde buz altında bulunan değerli Altın Balık çalındı. Dört şüpheli gece vardiyasındaydı.",
+        suspects: [
+            {
+                id: "s1", name: "Köpek Bruno", species: "Köpek",
+                statement: "Gece boyunca güvenlik kulübesinde uyudum. Kimseyi görmedim.",
+                traits: ["Güvenilir", "Sadık", "Uysal"],
+                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
+                criminalRecord: "Postacı Korkutma (2023), Gürültü İhlali"
+            },
+            {
+                id: "s2", name: "Kedi Whiskers", species: "Kedi",
+                statement: "Saat 03:00'te depoda fare kovalıyordum. Beni gören olmadı.",
+                traits: ["Çevik", "Sinsi", "Meraklı"],
+                isGuilty: true, accessory: "tie", appearance: "innocent",
+                criminalRecord: "Temiz"
+            },
+            {
+                id: "s3", name: "Rakun Rocky", species: "Rakun",
+                statement: "Çöpleri ayıklıyordum. Balık sandığına yaklaşmadım.",
+                traits: ["Çalışkan", "Meşgul", "Dürüst"],
+                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
+                criminalRecord: "İzinsiz Çöp Karıştırma (2022), Tespih Boncuğu Çalma"
+            },
+            {
+                id: "s4", name: "Baykuş Owliver", species: "Baykuş",
+                statement: "Çatıdan gözetliyordum. Her şey normaldi.",
+                traits: ["Bilge", "Gözlemci", "Sakin"],
+                isGuilty: false, accessory: "monocle", appearance: "innocent",
+                criminalRecord: "Temiz"
+            }
+        ],
+        evidence: [
+            {
+                id: "e1", title: "Islak Ayak İzi Raporu", type: "report",
+                content: "Sandığın yanında bulunan ıslak ayak izleri küçük ve pençeli bir hayvana ait. İz genişliği: 4cm. Depo girişine kadar uzanıyor."
+            },
+            {
+                id: "e2", title: "Gece Nöbetçisinin Notu", type: "note",
+                content: "Saat 02:45'te depo ışığının yandığını gördüm. Baktığımda sadece bir kuyruğun kaybolduğunu fark ettim. İnce, çizgili bir kuyruktu."
+            },
+            {
+                id: "e3", title: "Kayıp İlanı", type: "flyer",
+                content: "KAYIP\nALTIN BALIK\nSon görüldüğü yer: B-7 Deposu\nSabah 05:30'da kaybolduğu anlaşıldı.\nBilen veya gören: Pazar Müdürü ile iletişime geçin."
+            }
+        ],
+        solution: {
+            successTitle: "Tebrikler Dedektif!",
+            successMessage: "Kedi Whiskers sandıktan Altın Balığı çaldı. Masum görünüşü ve temiz sicili herkesi yanılttı. Oysa o gece depoda 'fare kovaladığını' söyledi — ama pazar faresi yoktu. Islak pençe izi ve ince kuyruk gölgesi onu ele verdi.",
+            failureTitle: "Yanlış Çıktı!",
+            failureMessage: "Suçlu Kedi Whiskers'dı. Göz bandı ve uzun sabıka kaydına rağmen Bruno masumdu. Gerçek ipucu: ıslak küçük pençe izi + ince kuyruk gölgesi. Görünüşe aldanmamak lazım!"
+        }
+    },
+    {
+        title: "Müzeden Kaybolan Kemik",
+        description: "Doğa Tarihi Müzesi'nin en değerli eseri, 65 milyon yıllık Dinozor Kemiği bir gecede ortadan kayboldu. Gece vardiyasındaki dört çalışan sorgulanıyor.",
+        suspects: [
+            {
+                id: "s1", name: "Ayı Bernard", species: "Ayı",
+                statement: "Sergi salonunu temizledim ve ayrıldım. Kemik o zaman yerindeydi.",
+                traits: ["İri Yarı", "Sakin", "Güvenilir"],
+                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
+                criminalRecord: "Bal Kavanozu Kırma (2021), Park Bankı Ezme"
+            },
+            {
+                id: "s2", name: "Fare Pip", species: "Fare",
+                statement: "Gece boyunca arşivde çalıştım. Sergi salonuna girmedim.",
+                traits: ["Küçük", "Sessiz", "Çalışkan"],
+                isGuilty: false, accessory: "glasses", appearance: "innocent",
+                criminalRecord: "Temiz"
+            },
+            {
+                id: "s3", name: "Tilki Vex", species: "Tilki",
+                statement: "Müze dışında devriye attım. İçeri girmedim.",
+                traits: ["Kurnaz", "Hızlı", "Çevik"],
+                isGuilty: true, accessory: "hat", appearance: "innocent",
+                criminalRecord: "Temiz"
+            },
+            {
+                id: "s4", name: "Panda Chen", species: "Panda",
+                statement: "Kasa odasında uyuya kaldım. Sabaha kadar çıkmadım.",
+                traits: ["Tembel", "Zararsız", "Uysal"],
+                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
+                criminalRecord: "Bambu İzinsiz Toplama, Trafik Işığı İhlali (x3)"
+            }
+        ],
+        evidence: [
+            {
+                id: "e1", title: "Alarm Kayıtları", type: "report",
+                content: "Gece 02:17'de sergi salonu kapısı 40 saniye aralıklı açık kaldı. Alarm sessiz moda alınmış. Sessiz mod şifresini yalnızca dış devriye personeli biliyor."
+            },
+            {
+                id: "e2", title: "Güvenlik Kamerasından Not", type: "note",
+                content: "Kamera açısı 02:00-02:30 arası bulanık. Biri kameraya sprey sürmüş. Spreyin bıraktığı koku: 'çam ve toprak karışımı' — dış devriye personeline özgü çizme boyası."
+            },
+            {
+                id: "e3", title: "Koleksiyoncu İlanı", type: "flyer",
+                content: "ÖZEL KOLEKSİYON ARANIYOR\nKretase dönemi kemik fosili\nNakit ödeme, soru sorulmaz\nGizli görüşme: Liman Hanı 7B"
+            }
+        ],
+        solution: {
+            successTitle: "Mükemmel Dedektiflik!",
+            successMessage: "Tilki Vex suçluydu. Dış devriye görevlisi olarak alarm şifresini biliyordu. Çizme boyası koku izi ve sessiz mod şifresi erişimi onu ele verdi. Şapkası ve temiz sicili herkesi kandırdı.",
+            failureTitle: "Kaçırdın!",
+            failureMessage: "Suçlu masum görünümlü Tilki Vex'ti. Anahtar ipuçları: sadece dış devriye personelinin bildiği alarm şifresi ve çam-toprak koku izi. Göz bandı ve uzun sabıkaya rağmen Panda Chen masumdu."
+        }
+    }
+    ];
+    const pick = cases[Math.floor(Math.random() * cases.length)];
+    return JSON.parse(JSON.stringify({ ...pick, id: Math.random().toString(36).substring(7) }));
+}
+
+// ---------- Helpers ----------
+function getSpeciesEmoji(species) {
+    const key = Object.keys(SPECIES_EMOJI_MAP).find(k => k.toLowerCase() === (species||'').toLowerCase());
+    return key ? SPECIES_EMOJI_MAP[key] : '1f575';
+}
+function getImageUrl(species) {
+    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${getSpeciesEmoji(species)}.svg`;
+}
+function getRank(score) {
+    if (score >= 500) return "Dedektif Kralı";
+    if (score >= 250) return "Başkomiser";
+    if (score >= 100) return "Memur";
+    return "Stajyer";
+}
+
+// ---------- SVG Icons ----------
+const ICONS = {
+    search: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+    checkCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#16a34a"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>`,
+    xCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#dc2626"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
+    checkCircleSmall: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>`,
+    arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
+    brainCircuit: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:#f59e0b;opacity:0.8"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>`,
+    fileText: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#1e40af"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
+    fileTextLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#1e40af"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
+    mapPin: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#15803d"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`,
+    mapPinLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#15803d"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`,
+    coffee: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#92400e"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-1"/></svg>`,
+    alertTriangle: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#b91c1c"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    alertTriangleLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#b91c1c"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    zoomIn: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>`,
+    x: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    loader: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin" style="color:#f59e0b"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
+};
+
+// ---------- Draggable System ----------
+function makeDraggable(el, initialX, initialY, rotation, itemId) {
+    let posX = initialX, posY = initialY;
+    let startMouseX, startMouseY;
+    let dragging = false;
+
+    el.style.transform = `translate(${posX}px, ${posY}px) rotate(${rotation}deg)`;
+
+    function bringToFront() {
+        state.topZ += 1;
+        el.style.zIndex = state.topZ;
+        state.zIndices[itemId] = state.topZ;
+    }
+
+    function onStart(e) {
+        e.preventDefault();
+        dragging = true;
+        el.classList.add('dragging');
+        bringToFront();
+        const touch = e.touches ? e.touches[0] : e;
+        startMouseX = touch.clientX - posX;
+        startMouseY = touch.clientY - posY;
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onEnd);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onEnd);
+    }
+
+    function onMove(e) {
+        if (!dragging) return;
+        e.preventDefault();
+        const touch = e.touches ? e.touches[0] : e;
+        posX = touch.clientX - startMouseX;
+        posY = touch.clientY - startMouseY;
+        el.style.transform = `translate(${posX}px, ${posY}px) rotate(${rotation}deg)`;
+    }
+
+    function onEnd() {
+        dragging = false;
+        el.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onEnd);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onEnd);
+    }
+
+    el.addEventListener('mousedown', onStart);
+    el.addEventListener('touchstart', onStart, { passive: false });
+}
+
+// ---------- Position Helpers ----------
+function getInitialPosition(type, index) {
+    const w = window.innerWidth, h = window.innerHeight;
+    const isMobile = w < 1024;
+    const isLandscape = w > h;
+    const safeW = w - (isMobile ? 50 : 200);
+    const centerX = w / 2;
+
+    if (type === 'suspect') {
+        if (isMobile && isLandscape) {
+            const spacing = Math.floor((w - 260) / 3);
+            return { x: 15 + index * spacing, y: 80, rot: index % 2 === 0 ? -2 : 2 };
+        } else if (isMobile) {
+            return { x: 20 + index * 15, y: 100 + index * 60, rot: (Math.random() * 4) - 2 };
+        } else {
+            const startX = centerX - 350;
+            return { x: startX + index * 250, y: 120, rot: index % 2 === 0 ? -2 : 2 };
+        }
+    } else {
+        if (isMobile && isLandscape) {
+            const spacing = Math.floor((w - 260) / 3);
+            return { x: 15 + index * spacing, y: h - 210, rot: (Math.random() * 10) - 5 };
+        } else if (isMobile) {
+            return { x: 20 + index * 10, y: h - 250 - index * 10, rot: (Math.random() * 10) - 5 };
+        } else {
+            return { x: (Math.random() * safeW) + 50, y: (Math.random() * 150) + 400, rot: (Math.random() * 20) - 10 };
+        }
+    }
+}
+
+// ---------- Card/Paper Builders ----------
+function buildAccessory(accessory) {
+    if (!accessory || accessory === 'none') return '';
+    switch (accessory) {
+        case 'hat':
+            return `<div style="position:absolute;top:-35%;left:15%;transform:rotate(-10deg);font-size:3.5rem;line-height:1;z-index:10;pointer-events:none" class="drop-shadow-md select-none">🎩</div>`;
+        case 'glasses':
+            return `<div style="position:absolute;top:25%;left:10%;width:80%;text-align:center;font-size:2.5rem;line-height:1;z-index:10;pointer-events:none" class="drop-shadow-md select-none">👓</div>`;
+        case 'monocle':
+            return `<div class="absolute top-[35%] right-[25%] w-8 h-8 border-2 border-amber-500 rounded-full bg-blue-200/20 z-10 shadow-sm pointer-events-none"><div class="absolute -bottom-8 -right-2 w-0.5 h-10 bg-amber-600 transform -rotate-12"></div></div>`;
+        case 'eyepatch':
+            return `<div class="absolute top-[30%] right-[30%] w-8 h-8 bg-black/90 rounded-full z-10 shadow-lg pointer-events-none"><div class="absolute top-4 -left-12 w-20 h-0.5 bg-black/80 transform -rotate-12"></div></div>`;
+        case 'tie':
+            return `<div style="position:absolute;bottom:-15%;left:25%;width:50%;text-align:center;font-size:2.5rem;line-height:1;z-index:10;pointer-events:none" class="drop-shadow-md select-none">🎀</div>`;
+        default: return '';
+    }
+}
+
+function buildSuspectCard(suspect, gameState) {
+    const isSuspicious = suspect.appearance === 'suspicious';
+    const isGuiltyRevealed = suspect.isGuilty && (gameState === 'success' || gameState === 'failure' || gameState === 'game_over');
+    const containerClass = isSuspicious ? "bg-stone-200 border-2 border-stone-600" : "bg-blue-50 border border-blue-200";
+    const photoBgClass = isSuspicious ? "bg-stone-400" : "bg-blue-100";
+    const headerClass = isSuspicious ? "bg-stone-800 text-stone-200" : "bg-blue-700 text-white";
+    const borderPhotoClass = isSuspicious ? "border-stone-700" : "border-blue-300";
+    const titleClass = isSuspicious ? "text-stone-900 border-stone-800" : "text-blue-900 border-blue-200";
+    const zoomBtnClass = isSuspicious ? "bg-stone-700/90 hover:bg-stone-600" : "bg-blue-700/90 hover:bg-blue-600";
+    const grayscale = isSuspicious ? 'filter:grayscale(0.5)' : '';
+    const bgLines = isSuspicious ? `<div class="absolute inset-0 z-0 flex flex-col justify-evenly opacity-30 pointer-events-none"><div class="border-b border-black w-full"></div><div class="border-b border-black w-full"></div><div class="border-b border-black w-full"></div><div class="border-b border-black w-full"></div></div>` : '';
+    const guiltyStamp = isGuiltyRevealed ? `<div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"><div class="border-4 border-red-600 text-red-600 font-bold text-3xl sm:text-4xl p-2 transform -rotate-12 opacity-80 bg-white/50 backdrop-blur-sm rounded">SUÇLU</div></div>` : '';
+    const recordColor = (suspect.criminalRecord === 'Temiz' || suspect.criminalRecord.includes('Yok')) ? 'bg-green-600' : 'bg-red-800';
+    const recordLabel = (suspect.criminalRecord === 'Temiz' || suspect.criminalRecord.includes('Yok')) ? 'TEMİZ' : 'SABIKALI';
+
+    return `
+    <div class="w-56 sm:w-64 p-2 sm:p-3 shadow-xl transform rotate-1 ${containerClass} transition-colors duration-300 touch-none select-none relative" style="${grayscale}">
+        <div class="${headerClass} p-1 mb-2 flex justify-between items-center px-2">
+            <span class="font-mono text-[10px] tracking-widest uppercase">${isSuspicious ? 'GÖZALTI' : 'KİMLİK'}</span>
+            <span class="font-mono text-[10px]">${suspect.id.slice(0,4)}</span>
+        </div>
+        <div class="relative h-40 sm:h-48 w-full overflow-visible ${photoBgClass} border-2 ${borderPhotoClass} flex items-center justify-center mb-2">
+            ${bgLines}
+            <div class="relative z-10 w-28 h-28 sm:w-32 sm:h-32">
+                <img src="${getImageUrl(suspect.species)}" alt="${suspect.species}" class="w-full h-full transform hover:scale-105 transition-transform duration-300 drop-shadow-lg pointer-events-none">
+                ${buildAccessory(suspect.accessory)}
+            </div>
+            ${guiltyStamp}
+        </div>
+        <h3 class="font-bold text-base sm:text-lg border-b-2 mb-1 uppercase font-serif tracking-wide truncate ${titleClass}">${suspect.name}</h3>
+        <div class="mb-2 bg-white/50 p-1.5 rounded border border-black/5">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] font-bold uppercase text-stone-500">Sabıka:</span>
+                <span class="text-[10px] font-bold px-1.5 rounded text-white ${recordColor}">${recordLabel}</span>
+            </div>
+            <p class="text-xs font-mono leading-tight text-stone-700 truncate">${suspect.criminalRecord}</p>
+        </div>
+        <div class="bg-white p-2 border border-stone-200 text-xs sm:text-sm italic font-serif leading-tight text-stone-800 relative shadow-sm">
+            <span class="text-2xl sm:text-4xl absolute -top-2 -left-1 text-stone-200">"</span>
+            <span class="relative z-10 block min-h-[3em]">${suspect.statement}</span>
+            <span class="text-2xl sm:text-4xl absolute -bottom-4 right-2 text-stone-200">"</span>
+        </div>
+        <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 w-16 sm:w-24 h-6 bg-yellow-200/80 rotate-2 shadow-sm border-l border-r border-white/50 pointer-events-none"></div>
+        <button data-zoom-suspect="${suspect.id}" onpointerdown="event.stopPropagation()" class="absolute bottom-2 right-2 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg z-30 transition-transform hover:scale-110 touch-auto ${zoomBtnClass}" title="Tam Ekranda Görüntüle" style="touch-action:auto">
+            ${ICONS.zoomIn}
+        </button>
+    </div>`;
+}
+
+function buildEvidencePaper(evidence) {
+    let specificStyle = '', fontStyle = '', iconHtml = '';
+    if (evidence.type === 'report') {
+        specificStyle = 'bg-orange-50 border-l-4 border-red-700 text-stone-800';
+        fontStyle = 'font-mono';
+        iconHtml = ICONS.alertTriangle;
+    } else if (evidence.type === 'flyer') {
+        specificStyle = 'bg-yellow-100 border border-yellow-300 text-stone-900';
+        fontStyle = 'font-sans font-bold';
+        iconHtml = ICONS.mapPin;
+    } else {
+        specificStyle = 'bg-white border-t-8 border-blue-100 text-blue-900';
+        fontStyle = 'font-handwriting font-serif italic';
+        iconHtml = ICONS.fileText;
+    }
+    const secretStamp = evidence.type === 'report' ? `<div class="absolute bottom-2 right-2 opacity-20 transform -rotate-12 pointer-events-none"><div class="border-4 border-red-900 text-red-900 rounded-full w-24 h-24 flex items-center justify-center font-bold text-xl uppercase tracking-widest">GİZLİ</div></div>` : '';
+
+    return `
+    <div class="w-64 p-4 shadow-xl text-sm transition-colors relative ${specificStyle}">
+        <div class="flex items-center gap-2 mb-3 border-b border-black/10 pb-2 pr-8">
+            ${iconHtml}
+            <span class="font-bold uppercase tracking-wider text-xs opacity-70">Kanıt #${evidence.id}</span>
+        </div>
+        <h4 class="font-bold mb-2 text-base leading-tight">${evidence.title}</h4>
+        <p class="whitespace-pre-line leading-relaxed ${fontStyle}">${evidence.content}</p>
+        ${secretStamp}
+        <button data-zoom-evidence="${evidence.id}" onpointerdown="event.stopPropagation()" class="absolute top-2 right-2 bg-amber-700/90 hover:bg-amber-600 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg z-30 transition-transform hover:scale-110 touch-auto" title="Tam Ekranda Görüntüle" style="touch-action:auto">
+            ${ICONS.zoomIn}
+        </button>
+    </div>`;
+}
+
+// ---------- Zoom Modal ----------
+function buildZoomModal() {
+    const { zoomItem, gameState } = state;
+    if (!zoomItem) return '';
+    const { type, data } = zoomItem;
+
+    let innerHtml = '';
+    if (type === 'evidence') {
+        let bgClass = '', fontStyle = '', iconHtml = '';
+        if (data.type === 'report') { bgClass = 'bg-orange-50 border-l-8 border-red-700 text-stone-800'; fontStyle = 'font-mono'; iconHtml = ICONS.alertTriangleLg; }
+        else if (data.type === 'flyer') { bgClass = 'bg-yellow-100 border-2 border-yellow-300 text-stone-900'; fontStyle = 'font-sans font-bold'; iconHtml = ICONS.mapPinLg; }
+        else { bgClass = 'bg-white border-t-8 border-blue-100 text-blue-900'; fontStyle = 'font-serif italic'; iconHtml = ICONS.fileTextLg; }
+        innerHtml = `
+        <div class="p-6 sm:p-8 shadow-2xl max-w-lg w-full ${bgClass}">
+            <div class="flex items-center gap-3 mb-5 border-b border-black/10 pb-3">
+                ${iconHtml}
+                <span class="font-bold uppercase tracking-wider text-sm opacity-70">Kanıt #${data.id}</span>
+                <span class="ml-auto text-xs opacity-50 uppercase">${data.type}</span>
+            </div>
+            <h4 class="font-bold mb-4 text-2xl leading-tight">${data.title}</h4>
+            <p class="whitespace-pre-line leading-loose text-base sm:text-lg ${fontStyle}">${data.content}</p>
+        </div>`;
+    } else {
+        const isGuiltyRevealed = data.isGuilty && (gameState === 'success' || gameState === 'failure' || gameState === 'game_over');
+        const recordColor = (data.criminalRecord === 'Temiz' || data.criminalRecord.includes('Yok')) ? 'bg-green-600' : 'bg-red-800';
+        const recordLabel = (data.criminalRecord === 'Temiz' || data.criminalRecord.includes('Yok')) ? 'TEMİZ' : 'SABIKALI';
+        const traitsHtml = data.traits && data.traits.length > 0
+            ? `<div><span class="text-xs uppercase font-bold text-stone-500 mr-2">Özellikler:</span>${data.traits.map(t => `<span class="inline-block bg-stone-200 text-stone-700 text-xs px-2 py-0.5 rounded-full mr-1 mb-1">${t}</span>`).join('')}</div>` : '';
+        const guiltyBadge = isGuiltyRevealed ? `<div class="mt-4 bg-red-100 border-2 border-red-500 text-red-700 text-center font-bold text-xl py-3 rounded uppercase tracking-widest">⚠️ SUÇLU ÇIKTI</div>` : '';
+        innerHtml = `
+        <div class="bg-stone-100 p-6 sm:p-8 shadow-2xl max-w-lg w-full">
+            <div class="flex items-center gap-5 mb-5 border-b border-stone-300 pb-5">
+                <img src="${getImageUrl(data.species)}" alt="${data.species}" class="w-24 h-24 object-contain flex-shrink-0">
+                <div>
+                    <h3 class="text-2xl font-bold font-serif text-stone-800 uppercase leading-tight">${data.name}</h3>
+                    <p class="text-sm text-stone-500 uppercase tracking-widest mt-1">${data.species}</p>
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="text-xs font-bold px-2 py-0.5 rounded text-white ${recordColor}">${recordLabel}</span>
+                        <span class="text-xs text-stone-500 font-mono">${data.criminalRecord}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white p-5 border border-stone-200 shadow-sm relative mb-4">
+                <div class="text-5xl text-stone-200 leading-none mb-2">"</div>
+                <p class="text-base sm:text-lg font-serif italic leading-relaxed text-stone-800">${data.statement}</p>
+                <div class="text-5xl text-stone-200 text-right leading-none mt-2">"</div>
+            </div>
+            ${traitsHtml}
+            ${guiltyBadge}
+        </div>`;
+    }
+
+    return `
+    <div id="zoom-modal" class="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4" style="touch-action:auto">
+        <div class="relative w-full max-w-lg max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+            <button id="zoom-close" class="absolute -top-12 right-0 text-white bg-stone-700 hover:bg-stone-600 rounded-full p-2.5 z-10 shadow-lg" style="touch-action:auto">
+                ${ICONS.x}
+            </button>
+            ${innerHtml}
+        </div>
+    </div>`;
+}
+
+// ---------- Main Render ----------
+function render() {
+    const root = document.getElementById('root');
+    const { gameState, currentCase, score, selectedSuspectId } = state;
+
+    if (gameState === 'intro') {
+        root.innerHTML = `
+        <div class="min-h-screen bg-stone-900 flex items-center justify-center p-4 font-serif text-stone-200">
+            <div class="max-w-md w-full bg-stone-800 p-8 shadow-2xl border-t-4 border-amber-600 rounded-lg relative overflow-hidden">
+                <div class="flex justify-center mb-6">${ICONS.brainCircuit}</div>
+                <h1 class="text-3xl font-bold text-center mb-2 tracking-wider text-amber-500">${INTRO_TEXT.title}</h1>
+                <h2 class="text-xl text-center mb-6 text-stone-400 uppercase tracking-widest">${INTRO_TEXT.subtitle}</h2>
+                <p class="text-lg leading-relaxed mb-8 text-stone-300 italic">"${INTRO_TEXT.body}"</p>
+                <button id="start-btn" class="w-full bg-amber-700 hover:bg-amber-600 text-white font-bold py-4 rounded shadow-lg transition-transform transform hover:scale-105 uppercase tracking-widest flex items-center justify-center gap-2">
+                    ${INTRO_TEXT.button}
+                </button>
+            </div>
+        </div>`;
+        document.getElementById('start-btn').addEventListener('click', () => loadNewCase());
+        return;
+    }
+
+    if (gameState === 'loading') {
+        root.innerHTML = `
+        <div class="min-h-screen bg-stone-900 flex flex-col items-center justify-center p-4 font-serif text-amber-500">
+            ${ICONS.loader}
+            <h2 class="text-2xl font-bold uppercase tracking-widest animate-pulse mt-4">Vaka Oluşturuluyor...</h2>
+            <p class="text-stone-400 mt-2">Şüpheliler sorgulanıyor, kanıtlar toplanıyor.</p>
+        </div>`;
+        return;
+    }
+
+    const isRoundEnd = gameState === 'success' || gameState === 'failure';
+
+    root.innerHTML = `
+    <div class="min-h-screen h-screen bg-[#2c241b] overflow-hidden relative selection:bg-amber-200 selection:text-amber-900 touch-none">
+        <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image:url('https://www.transparenttextures.com/patterns/wood-pattern.png')"></div>
+
+        <div class="absolute top-0 left-0 right-0 h-16 bg-stone-900/95 backdrop-blur-sm z-50 flex items-center justify-between px-4 sm:px-6 shadow-xl border-b border-stone-700">
+            <div class="flex items-center gap-4 text-stone-200">
+                <div class="flex items-center gap-2">
+                    ${ICONS.search}
+                    <span class="font-bold tracking-widest uppercase text-sm hidden sm:block">Sabıkalı Patiler</span>
+                </div>
+                <div class="h-6 w-px bg-stone-700 mx-2 hidden sm:block"></div>
+                <div class="text-xs font-mono text-stone-400 hidden md:block truncate max-w-[200px]">Vaka: <span class="text-white font-bold">${currentCase?.title||''}</span></div>
+            </div>
+            <div class="flex items-center gap-2 sm:gap-4">
+                <div class="bg-stone-800 px-3 py-1 rounded border border-stone-600 flex flex-col items-end">
+                    <span class="text-[9px] text-stone-400 uppercase tracking-widest">${getRank(score)}</span>
+                    <span class="font-mono font-bold leading-none text-sm ${score < 0 ? 'text-red-400' : 'text-green-400'}">${score} P</span>
+                </div>
+                ${gameState === 'investigation' ? `<button id="accuse-btn" class="bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded font-bold uppercase tracking-wider text-xs sm:text-sm shadow-lg transition-colors border border-red-500 animate-pulse whitespace-nowrap">Suçla</button>` : ''}
+            </div>
+        </div>
+
+        <div id="game-area" class="w-full h-full absolute top-0 left-0 overflow-hidden cursor-crosshair touch-none">
+            ${gameState === 'investigation' && currentCase ? `
+            <div class="absolute top-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:transform sm:-translate-x-1/2 bg-stone-800/90 text-stone-200 p-3 sm:p-4 rounded shadow-xl border border-amber-900/50 max-w-2xl text-center z-10 pointer-events-none animate-in">
+                <h3 class="text-amber-500 font-bold uppercase tracking-widest text-xs sm:text-sm mb-1">${currentCase.title}</h3>
+                <p class="font-serif italic text-xs sm:text-sm">${currentCase.description}</p>
+            </div>` : ''}
+        </div>
+
+        ${gameState === 'accusation' && currentCase ? `
+        <div class="absolute inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" style="touch-action:auto">
+            <div class="bg-stone-100 max-w-4xl w-full p-4 sm:p-8 rounded-sm shadow-2xl relative border-4 sm:border-8 border-stone-800 my-auto">
+                <button id="cancel-accuse-btn" class="absolute top-2 right-2 sm:top-4 sm:right-4 text-stone-500 hover:text-stone-800 font-bold text-sm bg-stone-200 px-2 py-1 rounded">İPTAL</button>
+                <h2 class="text-2xl sm:text-3xl font-bold text-center mb-2 uppercase text-stone-800">Suçlu Kim?</h2>
+                <p class="text-center text-stone-500 mb-4 sm:mb-8 font-serif italic text-xs sm:text-sm">Yanlış seçim: -50 puan.</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    ${currentCase.suspects.map(s => `
+                    <button data-suspect-select="${s.id}" class="flex flex-col items-center relative group transition-all duration-200 bg-white p-2 shadow-sm border border-stone-200 ${selectedSuspectId === s.id ? 'ring-4 ring-red-600 z-10' : 'hover:bg-stone-50'}">
+                        <div class="w-full h-24 sm:h-28 p-1 bg-amber-50 flex-shrink-0">
+                            <img src="${getImageUrl(s.species)}" alt="${s.name}" class="w-full h-full object-contain">
+                        </div>
+                        <div class="text-center p-1">
+                            <h3 class="text-xs sm:text-sm font-bold uppercase font-serif text-stone-800 leading-tight">${s.name}</h3>
+                            <p class="text-[10px] text-stone-500 uppercase">${s.species}</p>
+                        </div>
+                        ${selectedSuspectId === s.id ? `<div class="absolute -top-3 -right-3 bg-red-600 text-white rounded-full p-1 shadow-lg">${ICONS.checkCircleSmall}</div>` : ''}
+                    </button>`).join('')}
+                </div>
+                <div class="mt-6 sm:mt-8 flex justify-center">
+                    <button id="confirm-accuse-btn" ${!selectedSuspectId ? 'disabled' : ''} class="w-full sm:w-auto px-12 py-3 sm:py-4 text-lg sm:text-xl font-bold uppercase tracking-widest rounded shadow-xl transition-all ${selectedSuspectId ? 'bg-red-700 text-white hover:bg-red-800 transform hover:-translate-y-1' : 'bg-stone-300 text-stone-500 cursor-not-allowed'}">
+                        KARARI ONAYLA
+                    </button>
+                </div>
+            </div>
+        </div>` : ''}
+
+        ${isRoundEnd && currentCase ? `
+        <div class="absolute inset-0 z-[100] bg-stone-900 flex items-center justify-center p-4 animate-in">
+            <div class="max-w-2xl w-full p-6 sm:p-8 rounded-lg shadow-2xl border-l-8 ${gameState === 'success' ? 'bg-green-50 border-green-600' : 'bg-red-50 border-red-600'}">
+                <div class="flex flex-col sm:flex-row items-center gap-4 mb-6 text-center sm:text-left">
+                    ${gameState === 'success' ? ICONS.checkCircle : ICONS.xCircle}
+                    <div>
+                        <h2 class="text-2xl sm:text-3xl font-bold uppercase tracking-wider ${gameState === 'success' ? 'text-green-800' : 'text-red-800'}">
+                            ${gameState === 'success' ? currentCase.solution.successTitle : currentCase.solution.failureTitle}
+                        </h2>
+                        <div class="flex items-center justify-center sm:justify-start gap-2 mt-1">
+                            <span class="font-bold px-2 py-0.5 rounded text-sm text-white ${gameState === 'success' ? 'bg-green-700' : 'bg-red-700'}">${gameState === 'success' ? '+100 Puan' : '-50 Puan'}</span>
+                            <span class="text-stone-500 font-serif italic text-sm">Vaka Sonucu</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="prose prose-stone mb-8 text-base sm:text-lg text-stone-700 leading-relaxed font-serif border-t border-stone-200 pt-4 max-h-[40vh] overflow-y-auto">
+                    ${gameState === 'success' ? currentCase.solution.successMessage : currentCase.solution.failureMessage}
+                </div>
+                <div class="flex justify-center sm:justify-end">
+                    <button id="next-case-btn" class="flex items-center gap-2 px-8 py-3 rounded font-bold uppercase tracking-widest shadow-lg text-white transition-transform transform hover:scale-105 ${gameState === 'success' ? 'bg-green-700 hover:bg-green-800' : 'bg-stone-700 hover:bg-stone-800'}">
+                        Sıradaki Vaka ${ICONS.arrowRight}
+                    </button>
+                </div>
+            </div>
+        </div>` : ''}
+
+        ${buildZoomModal()}
+    </div>`;
+
+    // Event listeners
+    const accuseBtn = document.getElementById('accuse-btn');
+    if (accuseBtn) accuseBtn.addEventListener('click', () => setState({ gameState: 'accusation' }));
+
+    const cancelBtn = document.getElementById('cancel-accuse-btn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => setState({ gameState: 'investigation' }));
+
+    const confirmBtn = document.getElementById('confirm-accuse-btn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+            if (!state.selectedSuspectId) return;
+            const s = currentCase.suspects.find(x => x.id === state.selectedSuspectId);
+            if (s.isGuilty) setState({ score: state.score + 100, gameState: 'success' });
+            else setState({ score: state.score - 50, gameState: 'failure' });
+        });
+    }
+
+    document.querySelectorAll('[data-suspect-select]').forEach(btn => {
+        btn.addEventListener('click', () => setState({ selectedSuspectId: btn.dataset.suspectSelect }));
+    });
+
+    const nextBtn = document.getElementById('next-case-btn');
+    if (nextBtn) nextBtn.addEventListener('click', loadNewCase);
+
+    const zoomModal = document.getElementById('zoom-modal');
+    if (zoomModal) {
+        zoomModal.addEventListener('click', () => setState({ zoomItem: null }));
+        const closeBtn = document.getElementById('zoom-close');
+        if (closeBtn) closeBtn.addEventListener('click', (e) => { e.stopPropagation(); setState({ zoomItem: null }); });
+    }
+
+    // Draggable items
+    if (currentCase && (gameState === 'investigation' || isRoundEnd)) {
+        const gameArea = document.getElementById('game-area');
+        if (!gameArea) return;
+
+        currentCase.suspects.forEach((suspect, index) => {
+            const pos = getInitialPosition('suspect', index);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'draggable-item';
+            wrapper.style.zIndex = state.zIndices[suspect.id] || (index + 1);
+            wrapper.innerHTML = buildSuspectCard(suspect, gameState);
+            gameArea.appendChild(wrapper);
+            makeDraggable(wrapper, pos.x, pos.y, pos.rot, suspect.id);
+
+            const zoomBtn = wrapper.querySelector(`[data-zoom-suspect="${suspect.id}"]`);
+            if (zoomBtn) {
+                zoomBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    setState({ zoomItem: { type: 'suspect', data: suspect } });
+                });
+            }
+        });
+
+        currentCase.evidence.forEach((evidence, index) => {
+            const pos = getInitialPosition('evidence', index);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'draggable-item';
+            wrapper.style.zIndex = state.zIndices[evidence.id] || (index + currentCase.suspects.length + 1);
+            wrapper.innerHTML = buildEvidencePaper(evidence);
+            gameArea.appendChild(wrapper);
+            makeDraggable(wrapper, pos.x, pos.y, pos.rot, evidence.id);
+
+            const zoomBtn = wrapper.querySelector(`[data-zoom-evidence="${evidence.id}"]`);
+            if (zoomBtn) {
+                zoomBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    setState({ zoomItem: { type: 'evidence', data: evidence } });
+                });
+            }
+        });
+    }
+}
+
+// ---------- Load New Case ----------
+async function loadNewCase() {
+    setState({ loading: true, gameState: 'loading', zIndices: {}, topZ: 10, selectedSuspectId: null });
+    try {
+        const newCase = await generateCase();
+        setState({ currentCase: newCase, gameState: 'investigation', loading: false });
+    } catch (e) {
+        console.error(e);
+        alert('Vaka oluşturulamadı: ' + e.message);
+        setState({ gameState: 'intro', loading: false });
+    }
+}
+
+// ---------- Init ----------
+render();
+</script>
+</body>
+</html>

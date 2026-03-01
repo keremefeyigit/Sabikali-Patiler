@@ -1,57 +1,18 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sabıkalı Patiler - Dedektiflik Oyunu</title>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Permanent+Marker&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            touch-action: none;
-            font-family: 'Google Sans Text', 'Google Sans', sans-serif;
-        }
-        .font-handwriting { font-family: 'Permanent Marker', cursive; }
-        .font-mono { font-family: 'Courier Prime', monospace; }
-        .font-serif { font-family: 'Playfair Display', serif; }
+import re
+import sys
 
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .animate-spin { animation: spin 1s linear infinite; }
+def main():
+    old_file = 'index_old.html'
+    new_file = 'index.html'
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
-        .animate-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+    with open(old_file, 'r', encoding='utf-8') as f:
+        html = f.read()
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-in { animation: fadeIn 0.5s ease-in; }
+    # Remove the Tailwind script
+    html = re.sub(r'<script src="https://cdn\.tailwindcss\.com"></script>', '', html)
 
-        @keyframes rotatePulse {
-            0% { transform: rotate(0deg); }
-            25% { transform: rotate(15deg); }
-            75% { transform: rotate(-15deg); }
-            100% { transform: rotate(0deg); }
-        }
-        .rotate-hint { animation: rotatePulse 2.5s ease-in-out infinite; display: inline-block; }
-
-        #rotate-overlay { display: none; }
-        @media screen and (orientation: portrait) and (max-width: 1024px) {
-            #rotate-overlay { display: flex; }
-        }
-
-        .draggable-item {
-            position: absolute;
-            cursor: grab;
-            touch-action: none;
-            user-select: none;
-        }
-        .draggable-item.dragging { cursor: grabbing; }
-    
+    # Insert the CSS
+    css_content = """
         /* -- START OF NEW CSS -- */
         .accessory { position: absolute; pointer-events: none; z-index: 10; user-select: none; filter: drop-shadow(0 4px 3px rgb(0 0 0 / 0.07)) drop-shadow(0 2px 2px rgb(0 0 0 / 0.06)); }
         .accessory.hat { top: -35%; left: 15%; transform: rotate(-10deg); font-size: 3.5rem; line-height: 1; }
@@ -322,408 +283,20 @@
         .result-failure .next-btn { background-color: #44403c; }
         .result-failure .next-btn:hover { background-color: #292524; }
         /* -- END OF NEW CSS -- */
+"""
 
-    </style>
-</head>
-<body>
-<div id="rotate-overlay" style="position:fixed;inset:0;background:#1c1a17;z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:20px;color:#f5c842;">
-    <div class="rotate-hint" style="font-size:5rem;">📱</div>
-    <h2 style="font-size:1.4rem;font-weight:bold;text-align:center;font-family:'Playfair Display',serif;margin:0;padding:0 30px;color:#f5c842;">Lütfen Cihazı Yatay Çevirin</h2>
-    <p style="font-size:0.9rem;opacity:0.7;text-align:center;margin:0;padding:0 40px;font-family:sans-serif;color:#d4b896;">Bu oyun yatay (landscape) modda oynanmak üzere tasarlanmıştır.</p>
-    <div style="display:flex;align-items:center;gap:8px;opacity:0.5;font-size:0.8rem;font-family:sans-serif;color:#d4b896;">
-        <span>🔒</span><span>Yatay kilit açıksa kilidi kaldırın</span>
-    </div>
-</div>
-<div id="root"></div>
+    html = html.replace("</style>", css_content + "\n    </style>")
 
-<script>
-// ========== SABIKALI PATİLER - DEDEKTIFLIK OYUNU (Vanilla HTML5) ==========
+    replacements = [
+        # replace buildAccessory logic mappings
+        (r'case \'hat\':[\s\S]*?return `<div[^>]*>🎩</div>`;', r"case 'hat':\n            return `<div class=\"accessory hat\">🎩</div>`;"),
+        (r'case \'glasses\':[\s\S]*?return `<div[^>]*>👓</div>`;', r"case 'glasses':\n            return `<div class=\"accessory glasses\">👓</div>`;"),
+        (r'case \'monocle\':[\s\S]*?return `<div[^>]*><div[^>]*></div></div>`;', r"case 'monocle':\n            return `<div class=\"accessory monocle\"><div class=\"monocle-string\"></div></div>`;"),
+        (r'case \'eyepatch\':[\s\S]*?return `<div[^>]*><div[^>]*></div></div>`;', r"case 'eyepatch':\n            return `<div class=\"accessory eyepatch\"><div class=\"eyepatch-string\"></div></div>`;"),
+        (r'case \'tie\':[\s\S]*?return `<div[^>]*>🎀</div>`;', r"case 'tie':\n            return `<div class=\"accessory tie\">🎀</div>`;"),
 
-// ---------- Constants ----------
-const INTRO_TEXT = {
-    title: "Sabıkalı Patiler",
-    subtitle: "Sonsuz Suç Döngüsü",
-    body: "Şehre yeni bir dedektif lazım. Yapay zeka tarafından anlık olarak oluşturulan benzersiz vakalar seni bekliyor. Her doğru karar sana itibar kazandıracak (+100 Puan), her yanlış suçlama ise seni rezil edecek (-50 Puan). Karakterler sevimli görünebilir ama hepsi şüpheli!",
-    button: "Yeni Dosya İste"
-};
-
-const SPECIES_EMOJI_MAP = {
-    'Köpek':'1f436','Kedi':'1f431','Ayı':'1f43b','Tavşan':'1f430',
-    'Tilki':'1f98a','Fare':'1f42d','Baykuş':'1f989','Rakun':'1f99d',
-    'Panda':'1f43c','Kaplan':'1f42f','Aslan':'1f981','Domuz':'1f437',
-    'Maymun':'1f435','Koala':'1f428'
-};
-
-// ---------- App State ----------
-let state = {
-    gameState: 'intro',
-    currentCase: null,
-    score: 0,
-    zIndices: {},
-    topZ: 10,
-    selectedSuspectId: null,
-    loading: false,
-    zoomItem: null
-};
-
-function setState(patch) {
-    Object.assign(state, patch);
-    render();
-}
-
-// ---------- Gemini API (hardcoded key) ----------
-const GEMINI_API_KEY = ""; // API anahtarını buraya girin
-
-const CASE_SYSTEM_INSTRUCTION = `
-Sen "Sabıkalı Patiler" oyunu için Usta Dedektiflik Yazarısın.
-
-GÖREV: Oyuncuyu TERS KÖŞE yapacak zorlukta, tamamen özgün vakalar üret.
-
-KRİTİK TALİMAT 1 — GÖRSEL YANILTMA:
-- Görünüş (appearance) ile Suçluluk (isGuilty) arasında HİÇBİR bağlantı olmasın.
-- Masum karakterler "suspicious" görünebilir, göz bandı takabilir, uzun sabıka kaydı olabilir.
-- Suçlu karakterler "innocent" görünebilir, papyon/şapka takabilir, sicili tertemiz olabilir.
-- ASLA "Kötü görünen = suçlu" klişesine düşme.
-
-KRİTİK TALİMAT 2 — TÜR STEREOTİPİNDEN KAÇIN:
-- Hayvan türü ile suç/karakter özelliği arasında KESİNLİKLE klişe bağlantı kurma.
-- Tilki kurnaz olmak zorunda değil. Rakun çöp karıştırmak zorunda değil.
-  Ayı bal çalmak zorunda değil. Kedi balık çalmak zorunda değil.
-  Köpek sadık olmak zorunda değil. Fare küçük/sessiz olmak zorunda değil.
-- Özellikleri (traits) ve suçları tamamen RASTGELE ve beklenmedik ata.
-- Suçlunun türü ile işlenen suç arasında hiçbir mantıksal bağ olmasın.
-
-KRİTİK TALİMAT 3 — AKSESUAR:
-- 'suspicious' görünenlere: eyepatch
-- 'innocent' görünenlere: tie, glasses, monocle, hat (rastgele seç)
-
-ŞÜPHELI SAYISI: Her vakada tam 4 şüpheli, sadece 1 tanesi isGuilty: true.
-
-SCENARIO: Kanıtlar dolaylı, ifadelerdeki çelişkiler mantıksal olsun. Dil: Türkçe.
-`;
-
-const CASE_SCHEMA = {
-    type: "object",
-    properties: {
-        title: { type: "string" },
-        description: { type: "string" },
-        suspects: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    id: { type: "string" },
-                    name: { type: "string", description: "Format: '[Tür] [İngilizce İsim]'" },
-                    species: { type: "string", description: "SADECE: 'Köpek','Kedi','Ayı','Tavşan','Tilki','Fare','Baykuş','Rakun','Panda','Kaplan','Aslan','Maymun','Domuz','Koala'" },
-                    statement: { type: "string" },
-                    traits: { type: "array", items: { type: "string" } },
-                    isGuilty: { type: "boolean" },
-                    accessory: { type: "string", enum: ["hat","glasses","eyepatch","tie","monocle","none"] },
-                    appearance: { type: "string", enum: ["innocent","suspicious"] },
-                    criminalRecord: { type: "string" }
-                },
-                required: ["id","name","species","statement","traits","isGuilty","accessory","appearance","criminalRecord"]
-            }
-        },
-        evidence: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    id: { type: "string" },
-                    title: { type: "string" },
-                    type: { type: "string", enum: ["report","note","flyer"] },
-                    content: { type: "string" }
-                },
-                required: ["id","title","type","content"]
-            }
-        },
-        solution: {
-            type: "object",
-            properties: {
-                successTitle: { type: "string" },
-                successMessage: { type: "string" },
-                failureTitle: { type: "string" },
-                failureMessage: { type: "string" }
-            },
-            required: ["successTitle","successMessage","failureTitle","failureMessage"]
-        }
-    },
-    required: ["title","description","suspects","evidence","solution"]
-};
-
-async function generateCase() {
-    if (!GEMINI_API_KEY) {
-        // API anahtarı yoksa demo vaka döndür
-        await new Promise(r => setTimeout(r, 800));
-        return DEMO_CASE();
-    }
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const body = {
-        contents: [{ role: "user", parts: [{ text: "Tür stereotipinden tamamen kaçınan, görünüşün yanıltıcı olduğu, ters köşe bir vaka oluştur. MUTLAKA 4 şüpheli, sadece 1 suçlu." }] }],
-        systemInstruction: { parts: [{ text: CASE_SYSTEM_INSTRUCTION }] },
-        generationConfig: { responseMimeType: "application/json", responseSchema: CASE_SCHEMA }
-    };
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`API Hatası: ${res.status} ${res.statusText}`);
-    const json = await res.json();
-    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("API boş yanıt döndürdü.");
-    const data = JSON.parse(text);
-    data.id = Math.random().toString(36).substring(7);
-    return data;
-}
-
-// ---------- Demo Vaka (API anahtarı yokken) ----------
-function DEMO_CASE() {
-    const cases = [
-    {
-        title: "Balık Pazarı Cinayeti",
-        description: "Sabah 6'da balık pazarında bir sandık içinde buz altında bulunan değerli Altın Balık çalındı. Dört şüpheli gece vardiyasındaydı.",
-        suspects: [
-            {
-                id: "s1", name: "Köpek Bruno", species: "Köpek",
-                statement: "Gece boyunca güvenlik kulübesinde uyudum. Kimseyi görmedim.",
-                traits: ["Güvenilir", "Sadık", "Uysal"],
-                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
-                criminalRecord: "Postacı Korkutma (2023), Gürültü İhlali"
-            },
-            {
-                id: "s2", name: "Kedi Whiskers", species: "Kedi",
-                statement: "Saat 03:00'te depoda fare kovalıyordum. Beni gören olmadı.",
-                traits: ["Çevik", "Sinsi", "Meraklı"],
-                isGuilty: true, accessory: "tie", appearance: "innocent",
-                criminalRecord: "Temiz"
-            },
-            {
-                id: "s3", name: "Rakun Rocky", species: "Rakun",
-                statement: "Çöpleri ayıklıyordum. Balık sandığına yaklaşmadım.",
-                traits: ["Çalışkan", "Meşgul", "Dürüst"],
-                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
-                criminalRecord: "İzinsiz Çöp Karıştırma (2022), Tespih Boncuğu Çalma"
-            },
-            {
-                id: "s4", name: "Baykuş Owliver", species: "Baykuş",
-                statement: "Çatıdan gözetliyordum. Her şey normaldi.",
-                traits: ["Bilge", "Gözlemci", "Sakin"],
-                isGuilty: false, accessory: "monocle", appearance: "innocent",
-                criminalRecord: "Temiz"
-            }
-        ],
-        evidence: [
-            {
-                id: "e1", title: "Islak Ayak İzi Raporu", type: "report",
-                content: "Sandığın yanında bulunan ıslak ayak izleri küçük ve pençeli bir hayvana ait. İz genişliği: 4cm. Depo girişine kadar uzanıyor."
-            },
-            {
-                id: "e2", title: "Gece Nöbetçisinin Notu", type: "note",
-                content: "Saat 02:45'te depo ışığının yandığını gördüm. Baktığımda sadece bir kuyruğun kaybolduğunu fark ettim. İnce, çizgili bir kuyruktu."
-            },
-            {
-                id: "e3", title: "Kayıp İlanı", type: "flyer",
-                content: "KAYIP\nALTIN BALIK\nSon görüldüğü yer: B-7 Deposu\nSabah 05:30'da kaybolduğu anlaşıldı.\nBilen veya gören: Pazar Müdürü ile iletişime geçin."
-            }
-        ],
-        solution: {
-            successTitle: "Tebrikler Dedektif!",
-            successMessage: "Kedi Whiskers sandıktan Altın Balığı çaldı. Masum görünüşü ve temiz sicili herkesi yanılttı. Oysa o gece depoda 'fare kovaladığını' söyledi — ama pazar faresi yoktu. Islak pençe izi ve ince kuyruk gölgesi onu ele verdi.",
-            failureTitle: "Yanlış Çıktı!",
-            failureMessage: "Suçlu Kedi Whiskers'dı. Göz bandı ve uzun sabıka kaydına rağmen Bruno masumdu. Gerçek ipucu: ıslak küçük pençe izi + ince kuyruk gölgesi. Görünüşe aldanmamak lazım!"
-        }
-    },
-    {
-        title: "Müzeden Kaybolan Kemik",
-        description: "Doğa Tarihi Müzesi'nin en değerli eseri, 65 milyon yıllık Dinozor Kemiği bir gecede ortadan kayboldu. Gece vardiyasındaki dört çalışan sorgulanıyor.",
-        suspects: [
-            {
-                id: "s1", name: "Ayı Bernard", species: "Ayı",
-                statement: "Sergi salonunu temizledim ve ayrıldım. Kemik o zaman yerindeydi.",
-                traits: ["İri Yarı", "Sakin", "Güvenilir"],
-                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
-                criminalRecord: "Bal Kavanozu Kırma (2021), Park Bankı Ezme"
-            },
-            {
-                id: "s2", name: "Fare Pip", species: "Fare",
-                statement: "Gece boyunca arşivde çalıştım. Sergi salonuna girmedim.",
-                traits: ["Küçük", "Sessiz", "Çalışkan"],
-                isGuilty: false, accessory: "glasses", appearance: "innocent",
-                criminalRecord: "Temiz"
-            },
-            {
-                id: "s3", name: "Tilki Vex", species: "Tilki",
-                statement: "Müze dışında devriye attım. İçeri girmedim.",
-                traits: ["Kurnaz", "Hızlı", "Çevik"],
-                isGuilty: true, accessory: "hat", appearance: "innocent",
-                criminalRecord: "Temiz"
-            },
-            {
-                id: "s4", name: "Panda Chen", species: "Panda",
-                statement: "Kasa odasında uyuya kaldım. Sabaha kadar çıkmadım.",
-                traits: ["Tembel", "Zararsız", "Uysal"],
-                isGuilty: false, accessory: "eyepatch", appearance: "suspicious",
-                criminalRecord: "Bambu İzinsiz Toplama, Trafik Işığı İhlali (x3)"
-            }
-        ],
-        evidence: [
-            {
-                id: "e1", title: "Alarm Kayıtları", type: "report",
-                content: "Gece 02:17'de sergi salonu kapısı 40 saniye aralıklı açık kaldı. Alarm sessiz moda alınmış. Sessiz mod şifresini yalnızca dış devriye personeli biliyor."
-            },
-            {
-                id: "e2", title: "Güvenlik Kamerasından Not", type: "note",
-                content: "Kamera açısı 02:00-02:30 arası bulanık. Biri kameraya sprey sürmüş. Spreyin bıraktığı koku: 'çam ve toprak karışımı' — dış devriye personeline özgü çizme boyası."
-            },
-            {
-                id: "e3", title: "Koleksiyoncu İlanı", type: "flyer",
-                content: "ÖZEL KOLEKSİYON ARANIYOR\nKretase dönemi kemik fosili\nNakit ödeme, soru sorulmaz\nGizli görüşme: Liman Hanı 7B"
-            }
-        ],
-        solution: {
-            successTitle: "Mükemmel Dedektiflik!",
-            successMessage: "Tilki Vex suçluydu. Dış devriye görevlisi olarak alarm şifresini biliyordu. Çizme boyası koku izi ve sessiz mod şifresi erişimi onu ele verdi. Şapkası ve temiz sicili herkesi kandırdı.",
-            failureTitle: "Kaçırdın!",
-            failureMessage: "Suçlu masum görünümlü Tilki Vex'ti. Anahtar ipuçları: sadece dış devriye personelinin bildiği alarm şifresi ve çam-toprak koku izi. Göz bandı ve uzun sabıkaya rağmen Panda Chen masumdu."
-        }
-    }
-    ];
-    const pick = cases[Math.floor(Math.random() * cases.length)];
-    return JSON.parse(JSON.stringify({ ...pick, id: Math.random().toString(36).substring(7) }));
-}
-
-// ---------- Helpers ----------
-function getSpeciesEmoji(species) {
-    const key = Object.keys(SPECIES_EMOJI_MAP).find(k => k.toLowerCase() === (species||'').toLowerCase());
-    return key ? SPECIES_EMOJI_MAP[key] : '1f575';
-}
-function getImageUrl(species) {
-    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${getSpeciesEmoji(species)}.svg`;
-}
-function getRank(score) {
-    if (score >= 500) return "Dedektif Kralı";
-    if (score >= 250) return "Başkomiser";
-    if (score >= 100) return "Memur";
-    return "Stajyer";
-}
-
-// ---------- SVG Icons ----------
-const ICONS = {
-    search: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    checkCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#16a34a"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>`,
-    xCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#dc2626"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
-    checkCircleSmall: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>`,
-    arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
-    brainCircuit: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:#f59e0b;opacity:0.8"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>`,
-    fileText: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#1e40af"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
-    fileTextLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#1e40af"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
-    mapPin: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#15803d"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`,
-    mapPinLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#15803d"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`,
-    coffee: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#92400e"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-1"/></svg>`,
-    alertTriangle: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#b91c1c"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    alertTriangleLg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#b91c1c"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    zoomIn: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>`,
-    x: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    loader: `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin" style="color:#f59e0b"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
-};
-
-// ---------- Draggable System ----------
-function makeDraggable(el, initialX, initialY, rotation, itemId) {
-    let posX = initialX, posY = initialY;
-    let startMouseX, startMouseY;
-    let dragging = false;
-
-    el.style.transform = `translate(${posX}px, ${posY}px) rotate(${rotation}deg)`;
-
-    function bringToFront() {
-        state.topZ += 1;
-        el.style.zIndex = state.topZ;
-        state.zIndices[itemId] = state.topZ;
-    }
-
-    function onStart(e) {
-        e.preventDefault();
-        dragging = true;
-        el.classList.add('dragging');
-        bringToFront();
-        const touch = e.touches ? e.touches[0] : e;
-        startMouseX = touch.clientX - posX;
-        startMouseY = touch.clientY - posY;
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onEnd);
-        document.addEventListener('touchmove', onMove, { passive: false });
-        document.addEventListener('touchend', onEnd);
-    }
-
-    function onMove(e) {
-        if (!dragging) return;
-        e.preventDefault();
-        const touch = e.touches ? e.touches[0] : e;
-        posX = touch.clientX - startMouseX;
-        posY = touch.clientY - startMouseY;
-        el.style.transform = `translate(${posX}px, ${posY}px) rotate(${rotation}deg)`;
-    }
-
-    function onEnd() {
-        dragging = false;
-        el.classList.remove('dragging');
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onEnd);
-        document.removeEventListener('touchmove', onMove);
-        document.removeEventListener('touchend', onEnd);
-    }
-
-    el.addEventListener('mousedown', onStart);
-    el.addEventListener('touchstart', onStart, { passive: false });
-}
-
-// ---------- Position Helpers ----------
-function getInitialPosition(type, index) {
-    const w = window.innerWidth, h = window.innerHeight;
-    const isMobile = w < 1024;
-    const isLandscape = w > h;
-    const safeW = w - (isMobile ? 50 : 200);
-    const centerX = w / 2;
-
-    if (type === 'suspect') {
-        if (isMobile && isLandscape) {
-            const spacing = Math.floor((w - 260) / 3);
-            return { x: 15 + index * spacing, y: 80, rot: index % 2 === 0 ? -2 : 2 };
-        } else if (isMobile) {
-            return { x: 20 + index * 15, y: 100 + index * 60, rot: (Math.random() * 4) - 2 };
-        } else {
-            const startX = centerX - 350;
-            return { x: startX + index * 250, y: 120, rot: index % 2 === 0 ? -2 : 2 };
-        }
-    } else {
-        if (isMobile && isLandscape) {
-            const spacing = Math.floor((w - 260) / 3);
-            return { x: 15 + index * spacing, y: h - 210, rot: (Math.random() * 10) - 5 };
-        } else if (isMobile) {
-            return { x: 20 + index * 10, y: h - 250 - index * 10, rot: (Math.random() * 10) - 5 };
-        } else {
-            return { x: (Math.random() * safeW) + 50, y: (Math.random() * 150) + 400, rot: (Math.random() * 20) - 10 };
-        }
-    }
-}
-
-// ---------- Card/Paper Builders ----------
-function buildAccessory(accessory) {
-    if (!accessory || accessory === 'none') return '';
-    switch (accessory) {
-        case 'hat':
-            return `<div class=\"accessory hat\">🎩</div>`;
-        case 'glasses':
-            return `<div class=\"accessory glasses\">👓</div>`;
-        case 'monocle':
-            return `<div class=\"accessory monocle\"><div class=\"monocle-string\"></div></div>`;
-        case 'eyepatch':
-            return `<div class=\"accessory eyepatch\"><div class=\"eyepatch-string\"></div></div>`;
-        case 'tie':
-            return `<div class=\"accessory tie\">🎀</div>`;
-        default: return '';
-    }
-}
-
-function buildSuspectCard(suspect, gameState) {
+        # buildSuspectCard
+        (r'function buildSuspectCard\(suspect, gameState\) \{[\s\S]*?return `[\s\S]*?</div>`;\n}', r'''function buildSuspectCard(suspect, gameState) {
     const isSuspicious = suspect.appearance === 'suspicious';
     const isGuiltyRevealed = suspect.isGuilty && (gameState === 'success' || gameState === 'failure' || gameState === 'game_over');
     
@@ -766,9 +339,9 @@ function buildSuspectCard(suspect, gameState) {
             ${ICONS.zoomIn}
         </button>
     </div>`;
-}
-
-function buildEvidencePaper(evidence) {
+}'''),
+        # buildEvidencePaper
+        (r'function buildEvidencePaper\(evidence\) \{[\s\S]*?return `[\s\S]*?</div>`;\n}', r'''function buildEvidencePaper(evidence) {
     let specificStyle = '', iconHtml = '';
     if (evidence.type === 'report') {
         specificStyle = 'evidence-report';
@@ -795,10 +368,9 @@ function buildEvidencePaper(evidence) {
             ${ICONS.zoomIn}
         </button>
     </div>`;
-}
-
-// ---------- Zoom Modal ----------
-function buildZoomModal() {
+}'''),
+        # buildZoomModal
+        (r'function buildZoomModal\(\) \{[\s\S]*?return `[\s\S]*?</div>`;\n}', r'''function buildZoomModal() {
     const { zoomItem, gameState } = state;
     if (!zoomItem) return '';
     const { type, data } = zoomItem;
@@ -858,14 +430,9 @@ function buildZoomModal() {
             ${innerHtml}
         </div>
     </div>`;
-}
-
-// ---------- Main Render ----------
-function render() {
-    const root = document.getElementById('root');
-    const { gameState, currentCase, score, selectedSuspectId } = state;
-
-    if (gameState === 'intro') {
+}'''),
+        # Intro Screen
+        (r'if \(gameState === \'intro\'\) \{[\s\S]*?root\.innerHTML = `[\s\S]*?</div>`;\n        document\.getElementById\(\'start-btn\'\)\.addEventListener\(\'click\', \(\) => loadNewCase\(\)\);\n        return;\n    }', r'''if (gameState === 'intro') {
         root.innerHTML = `
         <div class="intro-screen">
             <div class="intro-box">
@@ -880,9 +447,9 @@ function render() {
         </div>`;
         document.getElementById('start-btn').addEventListener('click', () => loadNewCase());
         return;
-    }
-
-    if (gameState === 'loading') {
+    }'''),
+        # Loading Screen
+        (r'if \(gameState === \'loading\'\) \{[\s\S]*?root\.innerHTML = `[\s\S]*?</div>`;\n        return;\n    }', r'''if (gameState === 'loading') {
         root.innerHTML = `
         <div class="loading-screen">
             ${ICONS.loader}
@@ -890,9 +457,9 @@ function render() {
             <p class="loading-subtitle">Şüpheliler sorgulanıyor, kanıtlar toplanıyor.</p>
         </div>`;
         return;
-    }
-
-    const isRoundEnd = gameState === 'success' || gameState === 'failure';
+    }'''),
+        # Rest of render() HTML template
+        (r'const isRoundEnd = gameState === \'success\' \|\| gameState === \'failure\';\n\n    root\.innerHTML = `[\s\S]*?\$\{buildZoomModal\(\)\}\n    </div>`;', r'''const isRoundEnd = gameState === 'success' || gameState === 'failure';
 
     root.innerHTML = `
     <div class="game-wrapper selection-amber touch-none">
@@ -978,97 +545,16 @@ function render() {
         </div>` : ''}
 
         ${buildZoomModal()}
-    </div>`;
+    </div>`;''')
+    ]
 
-    // Event listeners
-    const accuseBtn = document.getElementById('accuse-btn');
-    if (accuseBtn) accuseBtn.addEventListener('click', () => setState({ gameState: 'accusation' }));
+    for pattern, repl in replacements:
+        html = re.sub(pattern, repl, html, flags=re.MULTILINE)
 
-    const cancelBtn = document.getElementById('cancel-accuse-btn');
-    if (cancelBtn) cancelBtn.addEventListener('click', () => setState({ gameState: 'investigation' }));
+    with open(new_file, 'w', encoding='utf-8') as f:
+        f.write(html)
+        
+    print(f"Refactoring complete, pure css version written to {new_file}")
 
-    const confirmBtn = document.getElementById('confirm-accuse-btn');
-    if (confirmBtn) {
-        confirmBtn.addEventListener('click', () => {
-            if (!state.selectedSuspectId) return;
-            const s = currentCase.suspects.find(x => x.id === state.selectedSuspectId);
-            if (s.isGuilty) setState({ score: state.score + 100, gameState: 'success' });
-            else setState({ score: state.score - 50, gameState: 'failure' });
-        });
-    }
-
-    document.querySelectorAll('[data-suspect-select]').forEach(btn => {
-        btn.addEventListener('click', () => setState({ selectedSuspectId: btn.dataset.suspectSelect }));
-    });
-
-    const nextBtn = document.getElementById('next-case-btn');
-    if (nextBtn) nextBtn.addEventListener('click', loadNewCase);
-
-    const zoomModal = document.getElementById('zoom-modal');
-    if (zoomModal) {
-        zoomModal.addEventListener('click', () => setState({ zoomItem: null }));
-        const closeBtn = document.getElementById('zoom-close');
-        if (closeBtn) closeBtn.addEventListener('click', (e) => { e.stopPropagation(); setState({ zoomItem: null }); });
-    }
-
-    // Draggable items
-    if (currentCase && (gameState === 'investigation' || isRoundEnd)) {
-        const gameArea = document.getElementById('game-area');
-        if (!gameArea) return;
-
-        currentCase.suspects.forEach((suspect, index) => {
-            const pos = getInitialPosition('suspect', index);
-            const wrapper = document.createElement('div');
-            wrapper.className = 'draggable-item';
-            wrapper.style.zIndex = state.zIndices[suspect.id] || (index + 1);
-            wrapper.innerHTML = buildSuspectCard(suspect, gameState);
-            gameArea.appendChild(wrapper);
-            makeDraggable(wrapper, pos.x, pos.y, pos.rot, suspect.id);
-
-            const zoomBtn = wrapper.querySelector(`[data-zoom-suspect="${suspect.id}"]`);
-            if (zoomBtn) {
-                zoomBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    setState({ zoomItem: { type: 'suspect', data: suspect } });
-                });
-            }
-        });
-
-        currentCase.evidence.forEach((evidence, index) => {
-            const pos = getInitialPosition('evidence', index);
-            const wrapper = document.createElement('div');
-            wrapper.className = 'draggable-item';
-            wrapper.style.zIndex = state.zIndices[evidence.id] || (index + currentCase.suspects.length + 1);
-            wrapper.innerHTML = buildEvidencePaper(evidence);
-            gameArea.appendChild(wrapper);
-            makeDraggable(wrapper, pos.x, pos.y, pos.rot, evidence.id);
-
-            const zoomBtn = wrapper.querySelector(`[data-zoom-evidence="${evidence.id}"]`);
-            if (zoomBtn) {
-                zoomBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    setState({ zoomItem: { type: 'evidence', data: evidence } });
-                });
-            }
-        });
-    }
-}
-
-// ---------- Load New Case ----------
-async function loadNewCase() {
-    setState({ loading: true, gameState: 'loading', zIndices: {}, topZ: 10, selectedSuspectId: null });
-    try {
-        const newCase = await generateCase();
-        setState({ currentCase: newCase, gameState: 'investigation', loading: false });
-    } catch (e) {
-        console.error(e);
-        alert('Vaka oluşturulamadı: ' + e.message);
-        setState({ gameState: 'intro', loading: false });
-    }
-}
-
-// ---------- Init ----------
-render();
-</script>
-</body>
-</html>
+if __name__ == '__main__':
+    main()
