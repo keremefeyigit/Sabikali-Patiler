@@ -1,9 +1,15 @@
-# OS / Editor Files
+# Logs and caches
+*.log
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
 
-# Node / Dependencies (if any)
-node_modules/
-*.log
+# Temp and cache files
+*worker*.js
+*editor*.js
+*editor*.css
+cb=gapi*
+gtm*.js
+m=_b*
+css2*
+*.tmp
+*.bak

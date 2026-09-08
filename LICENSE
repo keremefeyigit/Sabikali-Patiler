@@ -1,11 +1,19 @@
 Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0)
 
-Copyright (c) 2026 Kerem Efe Yiğit. All rights reserved.
+Telif Hakkı (c) 2026 Kerem Efe Yiğit. Tüm Hakları Saklıdır.
 
-Under the following terms:
-1. Attribution (BY): You must give appropriate credit to the author (Kerem Efe Yiğit), provide a link to the license, and indicate if changes were made.
-2. NonCommercial (NC): You may not use the material for commercial purposes.
-3. NoDerivatives (ND): If you remix, transform, or build upon the material, you may NOT distribute the modified material.
-4. Download & Inspection: Anyone may clone, download, view, and inspect this repository for non-commercial personal or educational use. Modification of the original repository files is strictly restricted to the repository owner.
+Bu proje kamuya açık olarak yayınlanmış olup, aşağıdaki koşullara tabidir:
 
-Full legal code: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+1. İndirme ve Yerel Çalıştırma (Kişisel Kullanım):
+   - Herkes bu yazılımı ve kaynak kodlarını kişisel ve eğitim amaçlı olarak bilgisayarına indirebilir, inceleyebilir ve yerel ortamda çevrimdışı çalıştırıp oynayabilir.
+
+2. Değişiklik ve Çatallama Yasağı (NoDerivatives):
+   - Bu yazılımın kaynak kodları üzerinde yetkisiz değişiklik yapılamaz, kodlar uyarlanamaz veya değiştirilmiş türevleri dağıtılamaz.
+
+3. Ticari Kullanım Yasağı (NonCommercial):
+   - Bu yazılım veya herhangi bir parçası ticari amaçlarla kullanılamaz, satılamaz veya gelir getiren platformlarda izinsiz barındırılamaz.
+
+4. Atıf (Attribution):
+   - Projenin paylaşımında veya referans verilmesinde orijinal geliştiriciye (Kerem Efe Yiğit) uygun atıfta bulunulması zorunludur.
+
+Tam yasal lisans metni: https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
